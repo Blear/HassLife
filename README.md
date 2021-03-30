@@ -17,7 +17,7 @@ Home Assistant的组件
 
 >>1、下载`homelife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
 
->>2、编辑`<homeassistant配置目录>/custom_components/configuration.yaml`文件，添加如下配置
+>>2、编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
 ```yaml
 hasslife:
   username: test  # HassLife上注册的用户名
