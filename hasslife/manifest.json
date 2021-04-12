@@ -1,7 +1,8 @@
 {
   "domain": "hasslife",
   "name": "hasslife",
-  "documentation": "https://www.example.com",
+  "version": "1.0",
+  "documentation": "https://www.blear.cn/article/tmall_homeassistent",
   "dependencies": [],
   "codeowners": [],
   "requirements": []
