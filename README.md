@@ -20,8 +20,8 @@ Home Assistant的组件
 >>2、编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
 ```yaml
 hasslife:
-  username: test  # HassLife上注册的用户名
-  password: 123456    # 注册的密码
+  username: "test"  # HassLife上注册的用户名
+  password: "123456"    # 注册的密码
 ```
 
 
@@ -54,7 +54,7 @@ hasslife:
 
     设备的开关状态支持设备：灯、开关、晾衣架、窗帘、电视、热水器、风扇、传感器、空调.
     
-	灯支持调整颜色、亮度
+	灯支持调整颜色、亮度、色温
     
 	空调支持更换模式：制冷、制热、送风、除湿、自动、温度调节。风速支持:低风、中风、高风、自动
     
