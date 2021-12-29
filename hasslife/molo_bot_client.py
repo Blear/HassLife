@@ -76,10 +76,6 @@ class MoloBotClient(asyncore.dispatcher):
             return None
 
         devicelist = MOLO_CLIENT_APP.hass_context.states.async_all()
-        jlist = json.dumps(
-            devicelist, sort_keys=True, cls=JSONEncoder)
-        if not jlist:
-            return None
 
         body = {
             'Type': 'SyncDevice',
@@ -87,10 +83,10 @@ class MoloBotClient(asyncore.dispatcher):
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
                 'Action': "synclist",
-                'List': jlist
+                'List': devicelist
             }
         }
-        body_jdata_str = json.dumps(body)
+        body_jdata_str = json.dumps(body, sort_keys=True, cls=JSONEncoder)
         self.send_raw_pack(body_jdata_str)
 
     def writable(self):
