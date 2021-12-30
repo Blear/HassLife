@@ -82,12 +82,27 @@ class MoloBotClient(asyncore.dispatcher):
             'Payload': {
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
-                'Action': "synclist",
                 'List': devicelist
             }
         }
         body_jdata_str = json.dumps(body, sort_keys=True, cls=JSONEncoder)
         self.send_raw_pack(body_jdata_str)
+
+    def sync_device_state(self, state):
+        if not state:
+            return None
+
+        body = {
+            'Type': 'SyncState',
+            'Payload': {
+                'Username': self._login_info['username'],
+                'Password': self._login_info['password'],
+                'State': state
+            }
+        }
+        body_jdata_str = json.dumps(body, sort_keys=True, cls=JSONEncoder)
+        self.send_raw_pack(body_jdata_str)
+
 
     def writable(self):
         """If the socket send buffer writable."""
