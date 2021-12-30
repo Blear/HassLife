@@ -68,7 +68,7 @@ def setup(hass, config):
     if not cfg.get("disablenotify", False):
         hass.components.persistent_notification.async_create(
             "Welcome to hasslife!", "hasslife Infomation", "hasslife_notify")
-
+    hass.bus.async_listen_once('homeassistant_started', hass_started)
     hass.bus.async_listen_once(EVENT_HOMEASSISTANT_START, start_molobot)
     hass.bus.async_listen(EVENT_STATE_CHANGED, on_state_changed)
 
