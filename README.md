@@ -15,7 +15,7 @@ Home Assistant的组件
 
 - [下载插件](https://gitee.com/blear/HassLife)
 
->>1、下载`homelife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
+>>1、下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
 
 >>2、重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】。
 
