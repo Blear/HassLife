@@ -17,7 +17,9 @@ Home Assistant的组件
 
 >>1、下载`homelife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
 
->>2、编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
+>>2、重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】。
+
+>>3、编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
 ```yaml
 hasslife:
   username: "test"  # HassLife上注册的用户名
@@ -33,6 +35,7 @@ hasslife:
 
 >>**群晖Docker用户:** 进入Docker - 映像 - homeassistant - 高级设置 - 卷, `/config`对应的路径就是配置目录
 
+>>4、再次重启HomeAssistent
 
 ## 天猫精灵app中配置实例
 * 打开[HassLife](https://hass.blear.cn) ,注册账号并登录
@@ -61,4 +64,6 @@ hasslife:
 	晾衣架支持：晾杆控制，开关控制
     
 	窗帘支持：窗帘的打开关闭
+
+        风扇支持：电源控制(打开/关闭风扇)、风速控制(1-100档(百分比风速)，最高档、抵挡、中低档、中高档、高档、超强档、微风档、自动挡)、左右旋转/摇头/摆风
 
