@@ -26,6 +26,7 @@ hasslife:
   password: "123456"    # 注册的密码
 ```
 
+>>4、再次重启HomeAssistent
 
 - homeassistant配置目录在哪?
 
@@ -35,7 +36,6 @@ hasslife:
 
 >>**群晖Docker用户:** 进入Docker - 映像 - homeassistant - 高级设置 - 卷, `/config`对应的路径就是配置目录
 
->>4、再次重启HomeAssistent
 
 ## 天猫精灵app中配置实例
 * 打开[HassLife](https://hass.blear.cn) ,注册账号并登录
