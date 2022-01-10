@@ -14,18 +14,20 @@ from homeassistant.const import __short_version__
 from .const import (BUFFER_SIZE, CLIENT_VERSION, CONFIG_FILE_NAME)
 from .molo_client_app import MOLO_CLIENT_APP
 from .molo_client_config import MOLO_CONFIGS
+from .molo_tcp_pack import MoloTcpPack
 from .utils import LOGGER, dns_open, get_rand_char, save_local_seed
 from homeassistant.helpers.json import JSONEncoder
 
 
 class MoloBotClient(asyncore.dispatcher):
     """Client protocol class for Molobot."""
-
+    protocol_func_bind_map = {}
     def __init__(self, host, port, map):
         """Initialize protocol arguments."""
         asyncore.dispatcher.__init__(self, map=map)
         self.host = host
         self.port = port
+        self.molo_tcp_pack = MoloTcpPack()
         self.ping_dequeue = queue.Queue()
         self.append_recv_buffer = None
         self.append_send_buffer = None
@@ -33,6 +35,7 @@ class MoloBotClient(asyncore.dispatcher):
         self._last_report_device = 0
         self._login_info={}
         self.clear()
+        self.init_func_bind_map()
 
     def handle_connect(self):
         """When connected, this method will be call."""
@@ -53,6 +56,7 @@ class MoloBotClient(asyncore.dispatcher):
         try:
             buff = self.recv(BUFFER_SIZE)
             self.append_recv_buffer += buff
+            self.process_molo_tcp_pack()
         except Exception as e:
             LOGGER.info("recv error: %s", e)
 
@@ -76,32 +80,37 @@ class MoloBotClient(asyncore.dispatcher):
             return None
 
         devicelist = MOLO_CLIENT_APP.hass_context.states.async_all()
-
+        jlist = json.dumps(
+                devicelist, sort_keys=True, cls=JSONEncoder)
+        if not jlist:
+            return None
         body = {
             'Type': 'SyncDevice',
             'Payload': {
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
-                'List': devicelist
+                'List': jlist
             }
         }
-        body_jdata_str = json.dumps(body, sort_keys=True, cls=JSONEncoder)
-        self.send_raw_pack(body_jdata_str)
+        self.send_dict_pack(body)
 
     def sync_device_state(self, state):
         if not state:
             return None
+        if not self._login_info:
+            return None
+        State = json.dumps(
+            state, sort_keys=True, cls=JSONEncoder)
 
         body = {
             'Type': 'SyncState',
             'Payload': {
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
-                'State': state
+                'State': State
             }
         }
-        body_jdata_str = json.dumps(body, sort_keys=True, cls=JSONEncoder)
-        self.send_raw_pack(body_jdata_str)
+        self.send_dict_pack(body)
 
 
     def writable(self):
@@ -109,7 +118,6 @@ class MoloBotClient(asyncore.dispatcher):
         ping_buffer = MOLO_CLIENT_APP.get_ping_buffer()
         if ping_buffer:
             self.append_send_buffer += ping_buffer
-        self.sync_device()
         return self.append_connect or (self.append_send_buffer)
 
     def handle_write(self):
@@ -135,22 +143,62 @@ class MoloBotClient(asyncore.dispatcher):
         self.connect((dns_ip, self.port))
 
 
-    def send_raw_pack(self, body_str):
+    def send_raw_pack(self, raw_data):
         """Send raw data packet."""
         if self.append_connect:
             return
-        body_str+="\t"
-        body_bytes = body_str.encode('utf-8')
-        self.append_send_buffer += body_bytes
+        self.append_send_buffer += raw_data
         self.handle_write()
 
+    def send_dict_pack(self, dict_data):
+        """Convert and send dict packet."""
+        if self.append_connect:
+            return
+        body = MoloTcpPack.generate_tcp_buffer(dict_data)
+        self.send_raw_pack(body)
 
     def ping_server_buffer(self):
         """Get ping buffer."""
         body = dict()
         body['Type'] = 'Ping'
-        body_jdata_str = json.dumps(body)+"\t"
-        body_jdata_bytes = body_jdata_str.encode('utf-8')
-        return body_jdata_bytes
+        body = MoloTcpPack.generate_tcp_buffer(body)
+        return body
+
+    def process_molo_tcp_pack(self):
+        """Handle received TCP packet."""
+        ret = True
+        while ret:
+            ret = self.molo_tcp_pack.recv_buffer(self.append_recv_buffer)
+            if ret and self.molo_tcp_pack.error_code == MoloTcpPack.ERR_OK:
+                self.process_json_pack(self.molo_tcp_pack.body_jdata)
+            self.append_recv_buffer = self.molo_tcp_pack.tmp_buffer
+        if self.molo_tcp_pack.error_code == MoloTcpPack.ERR_MALFORMED:
+            LOGGER.error("tcp pack malformed!")
+            self.handle_close()
+
+    def process_json_pack(self, jdata):
+        """Handle received json packet."""
+        LOGGER.debug("process_json_pack %s", str(jdata))
+        if jdata['Type'] in self.protocol_func_bind_map:
+            MOLO_CLIENT_APP.reset_activate_time()
+            self.protocol_func_bind_map[jdata['Type']](jdata)
+
+    def init_func_bind_map(self):
+        """Initialize protocol function bind map."""
+        self.protocol_func_bind_map = {
+            "DeviceControl": self.on_device_control
+        }
+
+    def on_device_control(self, jdata):
+        LOGGER.info("receive device state:%s", jdata)
+        jpayload = jdata['Payload']
+        data = jpayload.get("data")
+        exc = {}
+        try:
+            domain = jpayload.get("domain")
+            service = jpayload.get("service")
+            exc = MOLO_CLIENT_APP.hass_context.services.call(domain, service, data, blocking=True)
+        except Exception as e:
+            exc = traceback.format_exc()
 
 

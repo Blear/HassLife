@@ -16,8 +16,8 @@ class MoloConfigs:
 
     config_release = {
         'server': {
-            'host': "hass.blear.cn",
-            'port': 4443,
+            'host': "server.blear.cn",
+            'port': 4448,
             'bufsize': 1024
         }
     }

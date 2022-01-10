@@ -5,7 +5,7 @@
 Home Assistant的组件
 此Home Assistant的组件可以让天猫精灵对接HomeAssistant平台,上报设备状态,天猫精灵查询HomeAssistan平台上的智能家居设备状态。
 
-注意：本插件只负责上报HomeAssistent的设备状态信息到服务器，控制功能需要在HomeLife平台上配置。
+注意：本插件只负责上报HomeAssistent的设备状态信息到服务器，控制功能需要在[HassLife](https://hass.blear.cn) 平台上配置。
 ## 声明
 
 本组件基于MoloBot的代码，二次修改开发。
@@ -13,20 +13,22 @@ Home Assistant的组件
 
 ## 安装
 
-- [下载插件](https://gitee.com/blear/HassLife)
+- 方式1:手动下载[下载插件](https://gitee.com/blear/HassLife)
 
->>1、下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
+>>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
 
->>2、重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】。
+- 方式2:hacs安装仓库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
 
->>3、编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
+>>重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】
+
+>>编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
 ```yaml
 hasslife:
   username: "test"  # HassLife上注册的用户名
   password: "123456"    # 注册的密码
 ```
 
->>4、再次重启HomeAssistent
+>>再次重启HomeAssistent
 
 - homeassistant配置目录在哪?
 
