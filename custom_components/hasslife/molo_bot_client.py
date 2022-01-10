@@ -37,6 +37,7 @@ class MoloBotClient(asyncore.dispatcher):
         self._login_info={}
         self.clear()
         self.init_func_bind_map()
+        self.entity_ids = []
 
     def handle_connect(self):
         """When connected, this method will be call."""
@@ -113,8 +114,7 @@ class MoloBotClient(asyncore.dispatcher):
         if not self._login_info:
             return None
         entity_id = state.entity_id
-        domain = self._get_domain(entity_id)
-        if domain not in  self.white_domains:
+        if entity_id not in  self.entity_ids:
             return None
         State = json.dumps(
             state, sort_keys=True, cls=JSONEncoder)
@@ -203,7 +203,8 @@ class MoloBotClient(asyncore.dispatcher):
     def init_func_bind_map(self):
         """Initialize protocol function bind map."""
         self.protocol_func_bind_map = {
-            "DeviceControl": self.on_device_control
+            "DeviceControl": self.on_device_control,
+            "UpdateEntitys": self.on_update_entitys
         }
 
     def on_device_control(self, jdata):
@@ -215,6 +216,14 @@ class MoloBotClient(asyncore.dispatcher):
             domain = jpayload.get("domain")
             service = jpayload.get("service")
             exc = MOLO_CLIENT_APP.hass_context.services.call(domain, service, data, blocking=True)
+        except Exception as e:
+            exc = traceback.format_exc()
+
+    def on_update_entitys(self, jdata):
+        LOGGER.info("receive entitys:%s", jdata)
+        jpayload = jdata['Payload']
+        try:
+            self.entity_ids = jpayload.get("entity_ids")
         except Exception as e:
             exc = traceback.format_exc()
 
