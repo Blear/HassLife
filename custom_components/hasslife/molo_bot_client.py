@@ -21,6 +21,7 @@ from homeassistant.helpers.json import JSONEncoder
 
 class MoloBotClient(asyncore.dispatcher):
     """Client protocol class for Molobot."""
+    white_domains = ['binary_sensor','sensor','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean']
     protocol_func_bind_map = {}
     def __init__(self, host, port, map):
         """Initialize protocol arguments."""
@@ -70,6 +71,9 @@ class MoloBotClient(asyncore.dispatcher):
         self._login_info={'username':username,'password':password}
         return self._login_info
 
+    def _get_domain(self, entity_id):
+        return entity_id.split(".")[0]
+
     def sync_device(self, force=False, interval=180):
         now = time.time()
         if (not force) and (now - self._last_report_device < interval):
@@ -80,8 +84,17 @@ class MoloBotClient(asyncore.dispatcher):
             return None
 
         devicelist = MOLO_CLIENT_APP.hass_context.states.async_all()
+        usefull_entity = []
+        for sinfo in devicelist:
+            dinfo = sinfo.as_dict()
+            entity_id = dinfo['entity_id']
+            domain = self._get_domain(entity_id)
+
+            if domain in self.white_domains:
+                usefull_entity.append(dinfo)
+        
         jlist = json.dumps(
-                devicelist, sort_keys=True, cls=JSONEncoder)
+                usefull_entity, sort_keys=True, cls=JSONEncoder)
         if not jlist:
             return None
         body = {
@@ -98,6 +111,10 @@ class MoloBotClient(asyncore.dispatcher):
         if not state:
             return None
         if not self._login_info:
+            return None
+        entity_id = state.entity_id
+        domain = self._get_domain(entity_id)
+        if domain not in  self.white_domains:
             return None
         State = json.dumps(
             state, sort_keys=True, cls=JSONEncoder)

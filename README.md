@@ -13,11 +13,12 @@ Home Assistant的组件
 
 ## 安装
 1.安装插件
-- 方式1:手动下载[下载插件](https://gitee.com/blear/HassLife)
+- 方式1:hacs安装【推荐！】存储库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
+>>侧边栏HACS-》集成=》右上角...选项=>自定义存储库=>填写上面的存储库地址,类别选择集成=》添加
+- 方式2:手动下载[下载插件](https://gitee.com/blear/HassLife)
 
 >>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
 
-- 方式2:hacs安装仓库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
 
 2.重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】
 
