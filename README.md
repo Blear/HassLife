@@ -12,23 +12,23 @@ Home Assistant的组件
 源项目地址：[MoloBot](https://github.com/haoctopus/molobot)
 
 ## 安装
-
+1.安装插件
 - 方式1:手动下载[下载插件](https://gitee.com/blear/HassLife)
 
 >>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
 
 - 方式2:hacs安装仓库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
 
->>重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】
+2.重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】
 
->>编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
+3.编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
 ```yaml
 hasslife:
   username: "test"  # HassLife上注册的用户名
   password: "123456"    # 注册的密码
 ```
 
->>再次重启HomeAssistent
+4.再次重启HomeAssistent
 
 - homeassistant配置目录在哪?
 
@@ -66,6 +66,6 @@ hasslife:
 	晾衣架支持：晾杆控制，开关控制
     
 	窗帘支持：窗帘的打开关闭
-
-        风扇支持：电源控制(打开/关闭风扇)、风速控制(1-100档(百分比风速)，最高档、抵挡、中低档、中高档、高档、超强档、微风档、自动挡)、左右旋转/摇头/摆风
+    
+	风扇支持：电源控制(打开/关闭风扇)、风速控制(1-100档(百分比风速)，最高档、抵挡、中低档、中高档、高档、超强档、微风档、自动挡)、左右旋转/摇头/摆风
 
