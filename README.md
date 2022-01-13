@@ -16,21 +16,7 @@ Home Assistant的组件
 - 方式1:hacs安装【推荐！】存储库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
 >>侧边栏HACS-》集成=》右上角...选项=>自定义存储库=>填写上面的存储库地址,类别选择集成=》添加
 - 方式2:手动下载[下载插件](https://gitee.com/blear/HassLife)
-
->>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建。
-
-
-2.重启HomeAssistent,使插件生效【重要！先重启再配置hasslife信息,否则报错】
-
-3.编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
-```yaml
-hasslife:
-  username: "test"  # HassLife上注册的用户名
-  password: "123456"    # 注册的密码
-```
-
-4.再次重启HomeAssistent
-
+>>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建,然后重启HomeAssistant。
 - homeassistant配置目录在哪?
 
 >>**Windows用户:** `%APPDATA%\.homeassistant`
@@ -39,6 +25,10 @@ hasslife:
 
 >>**群晖Docker用户:** 进入Docker - 映像 - homeassistant - 高级设置 - 卷, `/config`对应的路径就是配置目录
 
+
+2.点击HomeAssistant侧边栏的配置=》集成=》右下角添加集成=》搜索hasslife并点击=》输入注册的hasslife账号密码点提交即可，插件第一次启动需要时间,请耐心等待。
+
+3.enjoy~
 
 ## 天猫精灵app中配置实例
 * 打开[HassLife](https://hass.blear.cn) ,注册账号并登录
