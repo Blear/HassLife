@@ -204,7 +204,9 @@ class MoloBotClient(asyncore.dispatcher):
         """Initialize protocol function bind map."""
         self.protocol_func_bind_map = {
             "DeviceControl": self.on_device_control,
-            "UpdateEntitys": self.on_update_entitys
+            "UpdateEntitys": self.on_update_entitys,
+            "Auth": self.on_auth,
+            "Error": self.on_error
         }
 
     def on_device_control(self, jdata):
@@ -224,6 +226,26 @@ class MoloBotClient(asyncore.dispatcher):
         jpayload = jdata['Payload']
         try:
             self.entity_ids = jpayload.get("entity_ids")
+        except Exception as e:
+            exc = traceback.format_exc()
+
+    def on_auth(self, jdata):
+        LOGGER.info("receive entitys:%s", jdata)
+        body = {
+            'Type': 'Auth',
+            'Payload': {
+                'Username': self._login_info['username'],
+                'Password': self._login_info['password'],
+            }
+        }
+        self.send_dict_pack(body)
+
+    def on_error(self, jdata):
+        LOGGER.info("error:%s", jdata)
+        jpayload = jdata['Payload']
+        try:
+            msg = jpayload.get("msg")
+            LOGGER.error("error:%s", msg)
         except Exception as e:
             exc = traceback.format_exc()
 

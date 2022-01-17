@@ -13,7 +13,7 @@ from .utils import LOGGER
 import time
 DOMAIN = 'hasslife'
 NOTIFYID = 'hasslifenotifyid'
-VERSION = 103
+VERSION = 104
 is_init = False
 last_start_time = time.time()
 
