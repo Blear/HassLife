@@ -12,11 +12,13 @@ Home Assistant的组件
 源项目地址：[MoloBot](https://github.com/haoctopus/molobot)
 
 ## 安装
-###1.安装插件
-####方式1:hacs安装【推荐！】存储库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
+
+### 1.安装插件
+
+##### 方式1:hacs安装【推荐！】存储库地址:[https://github.com/Blear/HassLife](https://github.com/Blear/HassLife)
 >>侧边栏HACS-》集成=》右上角...选项=>自定义存储库=>填写上面的存储库地址,类别选择集成=》添加
 
-####方式2:手动下载[下载插件](https://gitee.com/blear/HassLife)
+##### 方式2:手动下载[下载插件](https://gitee.com/blear/HassLife)
 >>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建,然后重启HomeAssistant。
 - homeassistant配置目录在哪?
 
@@ -27,7 +29,7 @@ Home Assistant的组件
 >>**群晖Docker用户:** 进入Docker - 映像 - homeassistant - 高级设置 - 卷, `/config`对应的路径就是配置目录
 
 
-###2.配置插件
+### 2.配置插件
 点击HomeAssistant侧边栏的配置=》集成=》右下角添加集成=》搜索hasslife并点击=》输入注册的hasslife账号密码点提交即可，插件第一次启动需要时间,请耐心等待。
 
 
