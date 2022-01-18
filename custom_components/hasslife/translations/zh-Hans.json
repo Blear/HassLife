@@ -1,5 +1,8 @@
 {
     "config": {
+        "abort": {
+            "single_instance_allowed": "Only a single configuration of HassLife is allowed."
+        },
         "error": {
         	"server_error": "服务器错误",
             "login_error": "用户名或密码不正确"

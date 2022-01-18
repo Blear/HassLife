@@ -20,6 +20,11 @@ class HassLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_user(self, user_input= None) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
+        if self._async_current_entries():
+            return self.async_abort(reason="single_instance_allowed")
+        if self.hass.data.get(DOMAIN):
+            return self.async_abort(reason="single_instance_allowed")
+
         if user_input is not None:
             unique_id = f"{user_input[CONF_USERNAME]}"
             await self.async_set_unique_id(unique_id)
