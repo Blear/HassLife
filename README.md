@@ -3,6 +3,9 @@
 **交流QQ群: 528735636**
 
 Home Assistant的组件
+
+[![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge)](https://github.com/hacs/integration)
+
 此Home Assistant的组件可以让天猫精灵、小爱同学对接HomeAssistant平台上的设备,控制设备、查询上报设备状态。
 
 注意：本插件只负责上报HomeAssistent的设备状态信息到服务器，控制功能需要在[HassLife](https://hass.blear.cn) 平台上配置。
@@ -61,7 +64,7 @@ Home Assistant的组件
     
 	窗帘支持：窗帘的打开关闭
     
-	风扇支持：电源控制(打开/关闭风扇)、风速控制(1-100档(百分比风速)，最高档、抵挡、中低档、中高档、高档、超强档、微风档、自动挡)、左右旋转/摇头/摆风
+	风扇支持：电源控制(打开/关闭风扇)、风速控制(1-3档，最高档、抵挡、中低档、中高档、高档、超强档、微风档、自动挡)、左右旋转/摇头/摆风
 
 ## 小爱同学配置实例
 * 打开[HassLife](https://hass.blear.cn) ,注册账号并登录
@@ -89,4 +92,4 @@ Home Assistant的组件
     
 	窗帘支持：窗帘的打开关闭
     
-	风扇支持：电源控制(打开/关闭风扇)、风速控制(1-100档(百分比风速)、左右旋转/摇头/摆风
+	风扇支持：电源控制(打开/关闭风扇)、风速控制(1-3档、左右旋转/摇头/摆风
