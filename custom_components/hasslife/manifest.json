@@ -7,5 +7,5 @@
   "documentation": "https://github.com/Blear/HassLife",
   "dependencies": [],
   "codeowners": [],
-  "requirements": []
+  "requirements": ["aiohttp"]
 }
