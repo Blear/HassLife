@@ -8,6 +8,5 @@
   "issue_tracker": "https://github.com/Blear/HassLife/issues",
   "dependencies": [],
   "codeowners": ["@Blear"],
-  "codeowners": [],
   "requirements": ["aiohttp"]
 }
