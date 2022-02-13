@@ -21,7 +21,7 @@ from homeassistant.helpers.json import JSONEncoder
 
 class MoloBotClient(asyncore.dispatcher):
     """Client protocol class for Molobot."""
-    white_domains = ['binary_sensor','sensor','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean']
+    white_domains = ['binary_sensor','sensor','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','automation','group']
     protocol_func_bind_map = {}
     def __init__(self, host, port, map):
         """Initialize protocol arguments."""
