@@ -13,7 +13,7 @@ from .utils import LOGGER
 import time
 DOMAIN = 'hasslife'
 NOTIFYID = 'hasslifenotifyid'
-VERSION = 104
+VERSION = 1.5
 is_init = False
 last_start_time = time.time()
 
@@ -36,7 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Load config mode from configuration.yaml.
     cfg = dict(entry.data)
-    cfg.update({"__version__": VERSION})
+    cfg.update({"version": VERSION})
     if 'mode' in cfg:
         MOLO_CONFIGS.load(cfg['mode'])
     else:

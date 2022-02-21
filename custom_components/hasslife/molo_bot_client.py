@@ -68,8 +68,9 @@ class MoloBotClient(asyncore.dispatcher):
         hassconfig = MOLO_CONFIGS.get_config_object().get("hassconfig", {})
         username = hassconfig.get("username", "")
         password = hassconfig.get("password", "")
+        version = hassconfig.get("version", 1.0)
         password = hashlib.sha1(password.encode('utf-8')).hexdigest()
-        self._login_info={'username':username,'password':password}
+        self._login_info={'username':username,'password':password,'version':version}
         return self._login_info
 
     def _get_domain(self, entity_id):
@@ -103,6 +104,7 @@ class MoloBotClient(asyncore.dispatcher):
             'Payload': {
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
+                'Version': self._login_info['version'],
                 'List': jlist
             }
         }
@@ -124,6 +126,7 @@ class MoloBotClient(asyncore.dispatcher):
             'Payload': {
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
+                'Version': self._login_info['version'],
                 'State': State
             }
         }
@@ -212,14 +215,16 @@ class MoloBotClient(asyncore.dispatcher):
     def on_device_control(self, jdata):
         LOGGER.info("receive device state:%s", jdata)
         jpayload = jdata['Payload']
-        data = jpayload.get("data")
-        exc = {}
-        try:
-            domain = jpayload.get("domain")
-            service = jpayload.get("service")
-            exc = MOLO_CLIENT_APP.hass_context.services.call(domain, service, data, blocking=True)
-        except Exception as e:
-            exc = traceback.format_exc()
+        rows=jpayload['Rows']
+        for row in rows:
+            data = row.get("data")
+            exc = {}
+            try:
+                domain = row.get("domain")
+                service = row.get("service")
+                exc = MOLO_CLIENT_APP.hass_context.services.call(domain, service, data, blocking=True)
+            except Exception as e:
+                exc = traceback.format_exc()
 
     def on_update_entitys(self, jdata):
         LOGGER.info("receive entitys:%s", jdata)
@@ -236,6 +241,7 @@ class MoloBotClient(asyncore.dispatcher):
             'Payload': {
                 'Username': self._login_info['username'],
                 'Password': self._login_info['password'],
+                'Version': self._login_info['version'],
             }
         }
         self.send_dict_pack(body)
