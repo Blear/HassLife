@@ -19,7 +19,7 @@ Home Assistant的组件
 ### 1.安装插件
 
 ##### 方式1:hacs安装【推荐！】
->>侧边栏HACS-》集成=》搜索hasslie并点击下载
+>>侧边栏HACS-》集成=》搜索hasslife并点击下载
 
 ##### 方式2:手动下载[下载插件](https://gitee.com/blear/HassLife)
 >>下载`hasslife`文件夹，保存在`<homeassistant配置目录>/custom_components/`目录中，若`custom_components`目录不存在则自行创建,然后重启HomeAssistant。
