@@ -209,7 +209,8 @@ class MoloBotClient(asyncore.dispatcher):
             "DeviceControl": self.on_device_control,
             "UpdateEntitys": self.on_update_entitys,
             "Auth": self.on_auth,
-            "Error": self.on_error
+            "Error": self.on_error,
+            "SyncDevice": self.on_sync_device
         }
 
     def on_device_control(self, jdata):
@@ -245,6 +246,10 @@ class MoloBotClient(asyncore.dispatcher):
             }
         }
         self.send_dict_pack(body)
+
+    def on_sync_device(self, jdata):
+        LOGGER.info("sync devices:%s", jdata)
+        self.sync_device(True)
 
     def on_error(self, jdata):
         LOGGER.info("error:%s", jdata)
