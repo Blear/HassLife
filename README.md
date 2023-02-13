@@ -33,9 +33,12 @@ Home Assistant的组件
 
 
 ### 2.配置插件
-点击HomeAssistant侧边栏的配置=》集成=》右下角添加集成=》搜索hasslife并点击=》输入注册的hasslife账号密码点提交即可，插件第一次启动需要时间,请耐心等待。
+##### 方式1:集成界面UI配置
+>>**点击HomeAssistant侧边栏的配置=》集成=》右下角添加集成=》搜索hasslife并点击=》输入注册的hasslife账号密码点提交即可，插件第一次启动需要时间,请耐心等待。**
+
 如遇到此集成不支持通过UI配置，如果您是从Home Assistant网站点击链接前来，请确保您运行的是最新版的Home Assistant提示。
 可以手动添加帐号配置，然后重启HomeAssistent
+##### 方式2:手动配置
 手动配置方法：
 编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
 ```yaml
