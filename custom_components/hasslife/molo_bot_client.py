@@ -257,6 +257,7 @@ class MoloBotClient(asyncore.dispatcher):
         try:
             msg = jpayload.get("msg")
             LOGGER.error("error:%s", msg)
+            MOLO_CLIENT_APP.stop_aligenie_bot()
         except Exception as e:
             exc = traceback.format_exc()
 
