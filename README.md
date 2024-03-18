@@ -38,14 +38,7 @@ Home Assistant的组件
 
 如遇到此集成不支持通过UI配置，如果您是从Home Assistant网站点击链接前来，请确保您运行的是最新版的Home Assistant提示。
 可以手动添加帐号配置，然后重启HomeAssistent
-##### 方式2:手动配置
-手动配置方法：
-编辑`<homeassistant配置目录>/configuration.yaml`文件，添加如下配置
-```yaml
-hasslife:
-  username: "test"  # HassLife上注册的用户名
-  password: "123456"    # 注册的密码
-```
+
 
 ## 天猫精灵app中配置实例
 * 打开[HassLife](https://hass.blear.cn) ,注册账号并登录

@@ -46,62 +46,66 @@ class TcpClient:
 
     async def send_message(self, message):
         if self.is_connected:
-            # 发送消息前确保连接是打开的
-            message_body = json.dumps(message).encode('utf-8')
-            # 计算消息体的长度  
-            message_length = len(message_body)
-            # 构造首部数据  
-            header_data = struct.pack('<I', message_length)
-            header_data=header_data.ljust(32, b'\x00')
-            #header_data=message_length.to_bytes(32, byteorder='little')
-            self.writer.write(header_data + message_body)
-            await self.writer.drain()
-            LOGGER.info("send :%s", message)
+            try:
+                # 发送消息前确保连接是打开的
+                message_body = json.dumps(message).encode('utf-8')
+                # 计算消息体的长度  
+                message_length = len(message_body)
+                # 构造首部数据  
+                header_data = struct.pack('<I', message_length)
+                header_data=header_data.ljust(32, b'\x00')
+                #header_data=message_length.to_bytes(32, byteorder='little')
+                self.writer.write(header_data + message_body)
+                await self.writer.drain()
+                LOGGER.info("send :%s", message)
+            except Exception as exc:
+                    exc = traceback.format_exc()
         else:
             LOGGER.info("Not connected. Cannot send message.")
 
     async def receive_message(self):
         if self.is_connected:
             while True:
-                header_data = await self.reader.read(32)  
-                if not header_data:  
-                    return None  # 如果没有数据，返回None
-                # 解析首部的unsigned int数据  
-                message_length = int.from_bytes(header_data, byteorder='little')
-                # 读取包体数据  
-                data = await self.reader.read(message_length)
-                #data = await self.reader.read(1024)
-                if data:
-                    LOGGER.info("Received:%s",data.decode())
-                    try:
+                try:
+                    header_data = await self.reader.read(32)  
+                    if not header_data:  
+                        return None  # 如果没有数据，返回None
+                    # 解析首部的unsigned int数据  
+                    message_length = int.from_bytes(header_data, byteorder='little')
+                    # 读取包体数据  
+                    data = await self.reader.read(message_length)
+                    #data = await self.reader.read(1024)
+                    if data:
+                        LOGGER.info("Received:%s",data.decode())
                         json_buff = data.decode('utf-8')
                         body_jdata = json.loads(json_buff)
-                    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                        LOGGER.error("recv body error %s",
-                         self.tmp_buffer[:self.body_len])
-                        logging.exception(exc)
-                        return
-                    await self.process_json_pack(body_jdata)
-                else:
-                    current_time = asyncio.get_running_loop().time()
-                    if current_time - self.heartbeat_timer > self.heartbeat_timeout:
-                        LOGGER.info("Heartbeat timed out!")
-                        return
-                    LOGGER.error("Connection closed by server.")
+                        await self.process_json_pack(body_jdata)
+                    else:
+                        current_time = asyncio.get_running_loop().time()
+                        if current_time - self.heartbeat_timer > self.heartbeat_timeout:
+                            LOGGER.info("Heartbeat timed out!")
+                            break
+                        LOGGER.error("Connection closed by server.")
+                        break
+                    # 如果收到响应，重置未响应计数器
+                    self.heartbeat_timer = asyncio.get_running_loop().time()
+                except Exception as exc:
+                    exc = traceback.format_exc()
                     break
-                # 如果收到响应，重置未响应计数器
-                self.heartbeat_timer = asyncio.get_running_loop().time()
         else:
             LOGGER.error("Not connected. Cannot receive message.")
 
     async def close_connection(self):
         if self.writer is not None:
-            self.writer.close()
-            await self.writer.wait_closed()
-            self.writer = None
-            self.reader = None
-            self.is_connected=False
-            LOGGER.info("Connection closed")
+            try:
+                self.writer.close()
+                await self.writer.wait_closed()
+                self.writer = None
+                self.reader = None
+                self.is_connected=False
+                LOGGER.info("Connection closed")
+            except Exception as exc:
+                    exc = traceback.format_exc()
 
     def run(self):
         self.last_start_time=time.time()
