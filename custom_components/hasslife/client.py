@@ -119,6 +119,9 @@ class TcpClient:
 
     async def loop(self):
         while not self.is_exited:
+            heartbeat_task = None  # 初始化心跳任务
+            listen_task = None  # 初始化监听任务
+
             try:
                 await self.connect()
                 heartbeat_task = asyncio.create_task(self.heartbeat())
@@ -126,13 +129,25 @@ class TcpClient:
                 await listen_task
             except Exception as e: 
                 LOGGER.error("Connection failed:%s",e)
+                # 取消并等待心跳任务
+            if heartbeat_task is not None:
                 heartbeat_task.cancel()
                 try:
                     await heartbeat_task
                 except asyncio.CancelledError:
                     pass
-                await self.close_connection()
-                await asyncio.sleep(5)
+
+            # 取消并等待监听任务
+            if listen_task is not None:
+                listen_task.cancel()
+                try:
+                    await listen_task
+                except asyncio.CancelledError:
+                    pass
+
+            # 关闭连接并等待5秒重连
+            await self.close_connection()
+            await asyncio.sleep(5)
         heartbeat_task.cancel()
         try:
             await heartbeat_task
@@ -293,16 +308,16 @@ class TcpClient:
         }
 
     async def on_state_changed(self,event):
-        if self.is_init :
-            await self.sync_device(True, 2)
-            self.is_init=False
-        elif self.last_start_time and (time.time() - self.last_start_time > 30):
-            self.last_start_time = None
-            await self.sync_device(True, 2)
-        elif not self.is_init or not last_start_time:
-            new_state = event.data.get("new_state")
-            if not new_state:
-                return
-            await self.sync_device_state(new_state)
+        # if self.is_init :
+        #     await self.sync_device(True, 2)
+        #     self.is_init=False
+        # elif self.last_start_time and (time.time() - self.last_start_time > 30):
+        #     self.last_start_time = None
+        #     await self.sync_device(True, 2)
+        # elif not self.is_init or not last_start_time:
+        new_state = event.data.get("new_state")
+        if not new_state:
+            return
+        await self.sync_device_state(new_state)
 
 
