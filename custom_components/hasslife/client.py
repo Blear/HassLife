@@ -69,28 +69,25 @@ class TcpClient:
                 try:
                     header_data = await self.reader.read(32)  
                     if not header_data:  
-                        return None  # 如果没有数据，返回None
-                    # 解析首部的unsigned int数据  
-                    message_length = int.from_bytes(header_data, byteorder='little')
-                    # 读取包体数据  
-                    data = await self.reader.read(message_length)
-                    #data = await self.reader.read(1024)
-                    if data:
-                        LOGGER.info("Received:%s",data.decode())
-                        json_buff = data.decode('utf-8')
-                        body_jdata = json.loads(json_buff)
-                        await self.process_json_pack(body_jdata)
-                    else:
                         current_time = asyncio.get_running_loop().time()
                         if current_time - self.heartbeat_timer > self.heartbeat_timeout:
                             LOGGER.info("Heartbeat timed out!")
                             break
-                        LOGGER.error("Connection closed by server.")
-                        break
-                    # 如果收到响应，重置未响应计数器
-                    self.heartbeat_timer = asyncio.get_running_loop().time()
+                        else:
+                            continue
+                    # 解析首部的unsigned int数据  
+                    message_length = int.from_bytes(header_data, byteorder='little')
+                    # 读取包体数据  
+                    data = await self.reader.read(message_length)
+                    if data:
+                        LOGGER.info("Received:%s",data.decode())
+                        json_buff = data.decode('utf-8')
+                        body_jdata = json.loads(json_buff)
+                        await self.process_json_pack(body_jdata) 
+                        # 如果收到响应，重置未响应计数器
+                        self.heartbeat_timer = asyncio.get_running_loop().time()
                 except Exception as exc:
-                    exc = traceback.format_exc()
+                    LOGGER.error("Exception occurred: %s", traceback.format_exc())
                     break
         else:
             LOGGER.error("Not connected. Cannot receive message.")
