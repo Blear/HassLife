@@ -173,7 +173,6 @@ class TcpClient:
         if (not force) and (now - self._last_report_device < interval):
             return None
         self._last_report_device = now
-        self._login_info = self.get_login_info()
         if not self._login_info:
             return None
 
@@ -245,6 +244,9 @@ class TcpClient:
 
     async def on_auth(self, jdata):
         LOGGER.info("receive entitys:%s", jdata)
+        self._login_info = self.get_login_info()
+        if not self._login_info:
+            return None
         body = {
             'Type': 'Auth',
             'Payload': {
