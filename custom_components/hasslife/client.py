@@ -31,9 +31,9 @@ class TcpClient:
         self.init_func_bind_map()
         self.entity_ids = []
 
-        # 设置心跳间隔（例如：5秒）
-        self.heartbeat_interval = 5
-        # 设置心跳超时时间（例如：60秒）
+        # 设置心跳间隔
+        self.heartbeat_interval = 10
+        # 设置心跳超时时间
         self.heartbeat_timeout = 60
         self.heartbeat_timer = time.time()
         self.last_start_time=None
