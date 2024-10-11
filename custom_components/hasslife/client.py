@@ -228,15 +228,20 @@ class TcpClient:
         LOGGER.info("receive device state:%s", jdata)
         jpayload = jdata['Payload']
         rows=jpayload['Rows']
+        tasks = []
         for row in rows:
             data = row.get("data")
-            exc = {}
             try:
                 domain = row.get("domain")
                 service = row.get("service")
-                exc = self.hass.services.call(domain, service, data, blocking=True)
+                tasks.append(self.hass.services.async_call(domain, service, data, blocking=True))
             except Exception as e:
                 exc = traceback.format_exc()
+                LOGGER.error("Error during service call: %s", exc)
+        try:
+            await asyncio.gather(*tasks)
+        except Exception as e:
+            LOGGER.error("Error executing tasks: %s", str(e))
 
 
     async def on_auth(self, jdata):
