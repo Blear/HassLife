@@ -107,12 +107,7 @@ class TcpClient:
     def run(self):
         self.last_start_time=time.time()
         self.hass.bus.async_listen(EVENT_STATE_CHANGED, self.on_state_changed)
-        client_thread = threading.Thread(target=self.main)  
-        client_thread.start()  
-
-    def main(self):
-        # 运行事件循环
-        asyncio.run(self.loop())
+        self.hass.async_create_task(self.loop())
 
     async def loop(self):
         while not self.is_exited:
