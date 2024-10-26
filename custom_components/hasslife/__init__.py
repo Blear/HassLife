@@ -13,7 +13,7 @@ from .utils import LOGGER
 
 DOMAIN = 'hasslife'
 NOTIFYID = 'hasslifenotifyid'
-VERSION = 3.2
+VERSION = 3.3
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # Load config mode from configuration.yaml.
