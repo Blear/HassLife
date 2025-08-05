@@ -5,7 +5,7 @@ import json
 import hashlib
 import traceback
 import threading
-from homeassistant.const import (__short_version__,EVENT_STATE_CHANGED)
+from homeassistant.const import (__short_version__,EVENT_STATE_CHANGED,EVENT_HOMEASSISTANT_STARTED)
 
 from .const import (BUFFER_SIZE, CLIENT_VERSION, CONFIG_FILE_NAME)
 from .molo_client_config import MOLO_CONFIGS
@@ -104,48 +104,49 @@ class TcpClient:
             except Exception as exc:
                     exc = traceback.format_exc()
 
+    async def on_start(self,event):
+        self.hass.async_create_task(self.loop())
+
     def run(self):
         self.last_start_time=time.time()
         self.hass.bus.async_listen(EVENT_STATE_CHANGED, self.on_state_changed)
-        self.hass.async_create_task(self.loop())
+        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, self.on_start)
 
     async def loop(self):
         while not self.is_exited:
-            heartbeat_task = None  # 初始化心跳任务
-            listen_task = None  # 初始化监听任务
+            heartbeat_task = None
+            listen_task = None
 
             try:
                 await self.connect()
                 heartbeat_task = asyncio.create_task(self.heartbeat())
                 listen_task = asyncio.create_task(self.receive_message())
-                await listen_task
+
+                while self.is_connected:
+                    await asyncio.sleep(1)
+
             except Exception as e: 
-                LOGGER.error("Connection failed:%s",e)
-                # 取消并等待心跳任务
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-                try:
-                    await heartbeat_task
-                except asyncio.CancelledError:
-                    pass
+                LOGGER.error("Connection failed: %s", e)
 
-            # 取消并等待监听任务
-            if listen_task is not None:
-                listen_task.cancel()
-                try:
-                    await listen_task
-                except asyncio.CancelledError:
-                    pass
+            finally:
+                if heartbeat_task is not None:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
 
-            # 关闭连接并等待5秒重连
-            await self.close_connection()
-            await asyncio.sleep(5)
-        heartbeat_task.cancel()
-        try:
-            await heartbeat_task
-        except asyncio.CancelledError:
-            pass
-        await self.close_connection()
+                if listen_task is not None:
+                    listen_task.cancel()
+                    try:
+                        await listen_task
+                    except asyncio.CancelledError:
+                        pass
+
+                await self.close_connection()
+                await asyncio.sleep(5)
+
+
 
     def stop(self):
         self.is_exited=True
