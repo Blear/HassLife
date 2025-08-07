@@ -1,7 +1,7 @@
 {
   "domain": "hasslife",
   "name": "hasslife",
-  "version": "3.4",
+  "version": "3.5",
   "config_flow": true,
   "iot_class": "cloud_polling",
   "documentation": "https://github.com/Blear/HassLife",
