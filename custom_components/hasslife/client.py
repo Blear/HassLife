@@ -35,13 +35,18 @@ class TcpClient:
         self.heartbeat_interval = 10
         # 设置心跳超时时间
         self.heartbeat_timeout = 60
-        self.heartbeat_timer = time.time()
+        self.heartbeat_timer = asyncio.get_running_loop().time()
         self.last_start_time=None
 
     async def connect(self):
-        self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
-        self.is_connected = True
-        LOGGER.info("Connected to:%s:%d", self.host,self.port)
+        try:
+            self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
+            self.is_connected = True
+            LOGGER.info("Connected to: %s:%d", self.host, self.port)
+        except Exception as e:
+            self.is_connected = False
+            LOGGER.error("Failed to connect: %s", traceback.format_exc())
+            raise
         
 
     async def send_message(self, message):
@@ -58,8 +63,12 @@ class TcpClient:
                 self.writer.write(header_data + message_body)
                 await self.writer.drain()
                 LOGGER.info("send :%s", message)
+            except (ConnectionResetError, BrokenPipeError) as e:
+                LOGGER.error("Connection broken while sending message: %s", e)
+                self.is_connected = False
             except Exception as exc:
-                    exc = traceback.format_exc()
+                LOGGER.error("send_message exception:\n%s", traceback.format_exc())
+                exc = traceback.format_exc()
         else:
             LOGGER.info("Not connected. Cannot send message.")
 
@@ -78,7 +87,7 @@ class TcpClient:
                     # 解析首部的unsigned int数据  
                     message_length = int.from_bytes(header_data, byteorder='little')
                     # 读取包体数据  
-                    data = await self.reader.read(message_length)
+                    data = await self._read_exactly(message_length)
                     if data:
                         LOGGER.info("Received:%s",data.decode())
                         json_buff = data.decode('utf-8')
@@ -88,27 +97,29 @@ class TcpClient:
                         self.heartbeat_timer = asyncio.get_running_loop().time()
                 except Exception as exc:
                     LOGGER.error("Exception occurred: %s", traceback.format_exc())
+                    self.is_connected = False
                     break
         else:
             LOGGER.error("Not connected. Cannot receive message.")
 
     async def close_connection(self):
+        self.is_connected = False
         if self.writer is not None:
             try:
                 self.writer.close()
                 await self.writer.wait_closed()
+            except Exception:
+                LOGGER.error("Error while closing connection: %s", traceback.format_exc())
+            finally:
                 self.writer = None
                 self.reader = None
-                self.is_connected=False
                 LOGGER.info("Connection closed")
-            except Exception as exc:
-                    exc = traceback.format_exc()
 
     async def on_start(self,event):
         self.hass.async_create_task(self.loop())
 
     def run(self):
-        self.last_start_time=time.time()
+        self.last_start_time=asyncio.get_running_loop().time()
         self.hass.bus.async_listen(EVENT_STATE_CHANGED, self.on_state_changed)
         self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, self.on_start)
 
@@ -153,16 +164,16 @@ class TcpClient:
 
     async def heartbeat(self):
         """发送心跳消息的协程，interval为心跳间隔时间（秒）。"""
-        if self.writer is not None:
-            while True:
-                await self.send_message({"Type":"Ping"})
+        while not self.is_exited:
+            if self.is_connected and self.writer is not None:
+                await self.send_message({"Type": "Ping"})
                 LOGGER.info("Heartbeat send")
-                await asyncio.sleep(self.heartbeat_interval)
-        else:
-            LOGGER.error("Not connected. Cannot send heartbeat.")
+            else:
+                LOGGER.warning("Heartbeat skipped: Not connected.")
+            await asyncio.sleep(self.heartbeat_interval)
 
     async def sync_device(self, force=False, interval=180):
-        now = time.time()
+        now = asyncio.get_running_loop().time()
         if (not force) and (now - self._last_report_device < interval):
             return None
         self._last_report_device = now
@@ -232,7 +243,6 @@ class TcpClient:
                 service = row.get("service")
                 tasks.append(self.hass.services.async_call(domain, service, data, blocking=True))
             except Exception as e:
-                exc = traceback.format_exc()
                 LOGGER.error("Error during service call: %s", exc)
         try:
             await asyncio.gather(*tasks)
@@ -261,7 +271,7 @@ class TcpClient:
         try:
             self.entity_ids = jpayload.get("entity_ids")
         except Exception as e:
-            exc = traceback.format_exc()
+            LOGGER.error("Error updating entity_ids: %s", traceback.format_exc())
 
 
     async def on_error(self, jdata):
@@ -320,4 +330,11 @@ class TcpClient:
             return
         await self.sync_device_state(new_state)
 
-
+    async def _read_exactly(self, n):
+        data = b''
+        while len(data) < n:
+            chunk = await self.reader.read(n - len(data))
+            if not chunk:
+                raise ConnectionResetError("Connection lost during reading")
+            data += chunk
+        return data
