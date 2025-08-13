@@ -190,8 +190,7 @@ class TcpClient:
             if domain in self.white_domains:
                 usefull_entity.append(dinfo)
         
-        jlist = json.dumps(
-                usefull_entity, sort_keys=True, cls=JSONEncoder)
+        jlist = json.dumps(usefull_entity, sort_keys=True, cls=JSONEncoder, default=str)
         if not jlist:
             return None
         body = {
