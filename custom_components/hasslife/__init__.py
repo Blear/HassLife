@@ -7,13 +7,13 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
-from .molo_client_config import MOLO_CONFIGS
-from .client import TcpClient
+from .hasslife_config import HASSLIFE_CONFIGS
+from .client_optimized import OptimizedTcpClient as TcpClient
 from .utils import LOGGER
+from .const import VERSION
 
 DOMAIN = 'hasslife'
 NOTIFYID = 'hasslifenotifyid'
-VERSION = 3.6
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     # Load config mode from configuration.yaml.
@@ -28,20 +28,20 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     return True
     
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up molobot component."""
+    """Set up hasslife component."""
     LOGGER.info("Begin setup hasslife!")
     hass.data.setdefault(DOMAIN, {})
     # Load config mode from configuration.yaml.
     cfg = dict(entry.data)
     cfg.update({"version": VERSION})
     if 'mode' in cfg:
-        MOLO_CONFIGS.load(cfg['mode'])
+        HASSLIFE_CONFIGS.load(cfg['mode'])
     else:
-        MOLO_CONFIGS.load('release')
-    MOLO_CONFIGS.get_config_object()["hassconfig"] = cfg
-    client = TcpClient(MOLO_CONFIGS.get_config_object()['server']['host'],
-        int(MOLO_CONFIGS.get_config_object()['server']['port']),hass)
-    client.run()
+        HASSLIFE_CONFIGS.load('release')
+    HASSLIFE_CONFIGS.get_config_object()["hassconfig"] = cfg
+    client = TcpClient(HASSLIFE_CONFIGS.get_config_object()['server']['host'],
+        int(HASSLIFE_CONFIGS.get_config_object()['server']['port']),hass)
+    await client.start()
     hass.data[DOMAIN][entry.entry_id] = {
         "client": client,
     }

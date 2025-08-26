@@ -1,4 +1,4 @@
-"""Utils for Molobot."""
+"""Utils for HassLife."""
 import logging
 import random
 import socket

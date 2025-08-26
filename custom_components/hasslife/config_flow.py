@@ -30,19 +30,19 @@ class HassLifeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
             info = None
-            payload  = {'username': user_input[CONF_USERNAME], 'password': user_input[CONF_PASSWORD]}
+            payload = {'username': user_input[CONF_USERNAME], 'password': user_input[CONF_PASSWORD]}
             async with aiohttp.ClientSession() as session:
-                async with session.post('https://hass.blear.cn/callback.php',data=payload) as response:
+                async with session.post('https://hass.blear.cn/api/login', json=payload) as response:
+                    data = await response.text()
+                    LOGGER.info("login info: %s", data)
+                    jsondata = json.loads(data)
                     if response.status == 200:
-                        data = await response.text()
-                        LOGGER.info("login info: %s", data)
-                        jsondata=json.loads(data)
-                        if jsondata['code'] == 'ok':
-                            info = {'title':user_input[CONF_USERNAME]}
+                        if jsondata['code'] == 1:
+                            info = {'title': user_input[CONF_USERNAME]}
                         else:
-                            errors["base"] = 'login_error'
+                            errors["base"] = jsondata.get('message', 'login_error')
                     else:
-                        errors["base"] = 'server_error'
+                        errors["base"] = jsondata.get('message', 'server_error')
             if info:
                 return self.async_create_entry(title=info["title"], data=user_input)
 

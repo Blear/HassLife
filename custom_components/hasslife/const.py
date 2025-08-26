@@ -1,8 +1,22 @@
-"""Constants for Molobot."""
+"""Constants for HassLife."""
+import os
+import json
+
+def get_version():
+    """从manifest.json获取插件版本号"""
+    try:
+        manifest_path = os.path.join(os.path.dirname(__file__), 'manifest.json')
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+            return manifest.get('version', '3.6')
+    except Exception:
+        return '3.6'
+
+# 版本号统一从manifest.json获取
+VERSION = get_version()
+CLIENT_VERSION = VERSION
 
 BUFFER_SIZE = 1024
-
-CLIENT_VERSION = '0.1'
 CONNECTED = 1
 
 PING_INTERVAL_DEFAULT = 10

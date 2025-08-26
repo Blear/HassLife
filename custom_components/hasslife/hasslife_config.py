@@ -1,8 +1,8 @@
-"""Configuration class for Molobot."""
+"""Configuration class for HassLife."""
 
 
-class MoloConfigs:
-    """Configuration class for Molobot."""
+class HassLifeConfigs:
+    """Configuration class for HassLife."""
 
     config_object = dict()
 
@@ -16,7 +16,7 @@ class MoloConfigs:
 
     config_release = {
         'server': {
-            'host': "server.blear.cn",
+            'host': "dev.blear.cn",
             'port': 4448,
             'bufsize': 1024
         }
@@ -36,4 +36,4 @@ class MoloConfigs:
         return self.config_object
 
 
-MOLO_CONFIGS = MoloConfigs()
+HASSLIFE_CONFIGS = HassLifeConfigs()
