@@ -149,8 +149,9 @@ class StateSyncManager:
         
         # 获取所有需要同步的设备
         devicelist = self.hass.states.async_all()
-        usefull_entity = []
+        all_devices = []
         
+        # 第一步：过滤domain并收集所有设备
         for sinfo in devicelist:
             dinfo = sinfo.as_dict()
             entity_id = dinfo['entity_id']
@@ -165,26 +166,33 @@ class StateSyncManager:
                     friendly_name = original_attrs['friendly_name']
                     filtered_attrs['friendly_name'] = friendly_name
                 
-                # 搜索过滤
-                if search_keyword:
-                    keyword = search_keyword.lower()
-                    entity_id_lower = entity_id.lower()
-                    friendly_name_lower = friendly_name.lower()
-                    
-                    # 匹配entity_id或friendly_name
-                    if keyword not in entity_id_lower and keyword not in friendly_name_lower:
-                        continue
-                
                 # 创建新的设备信息，保持原有格式但精简attributes
                 filtered_device = dict(dinfo)
                 filtered_device['attributes'] = filtered_attrs
-                usefull_entity.append(filtered_device)
+                all_devices.append((filtered_device, entity_id, friendly_name))
         
         # 按entity_id排序
-        usefull_entity.sort(key=lambda x: x['entity_id'])
+        all_devices.sort(key=lambda x: x[1])
         
-        # 分页处理
-        total_count = len(usefull_entity)
+        # 第二步：搜索过滤（如果有搜索条件）
+        if search_keyword:
+            keyword = search_keyword.lower()
+            filtered_devices = []
+            for device, entity_id, friendly_name in all_devices:
+                entity_id_lower = entity_id.lower()
+                friendly_name_lower = friendly_name.lower()
+                
+                # 匹配entity_id或friendly_name
+                if keyword in entity_id_lower or keyword in friendly_name_lower:
+                    filtered_devices.append(device)
+            
+            # 搜索结果
+            usefull_entity = filtered_devices
+            total_count = len(filtered_devices)
+        else:
+            # 无搜索条件，使用所有设备
+            usefull_entity = [device for device, _, _ in all_devices]
+            total_count = len(all_devices)
         if page_size is not None:
             # 计算分页
             start_idx = (page - 1) * page_size
