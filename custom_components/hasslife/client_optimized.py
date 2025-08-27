@@ -66,9 +66,11 @@ class OptimizedTcpClient:
             LOGGER.info("Connected to: %s:%d", self.host, self.port)
             return True
         except asyncio.TimeoutError:
+            self.is_connected = False
             LOGGER.error("Connection timeout to %s:%d", self.host, self.port)
             return False
         except Exception as e:
+            self.is_connected = False
             LOGGER.error("Failed to connect: %s", traceback.format_exc())
             return False
     
@@ -204,10 +206,12 @@ class OptimizedTcpClient:
     async def _main_loop(self):
         """主循环"""
         reconnect_delay = self._reconnect_delay
+        LOGGER.info("Starting main loop with host: %s:%d", self.host, self.port)
         
         while not self.is_exited:
             try:
                 async with self._connection_lock:
+                    LOGGER.debug("Attempting connection, is_connected=%s", self.is_connected)
                     if await self.connect():
                         # 启动工作协程
                         self._sender_task = asyncio.create_task(self._send_worker())
@@ -241,7 +245,7 @@ class OptimizedTcpClient:
                         
                         reconnect_delay = self._reconnect_delay
                     else:
-                        LOGGER.info("Reconnecting in %d seconds...", reconnect_delay)
+                        LOGGER.info("Connection failed, reconnecting in %d seconds...", reconnect_delay)
                         await asyncio.sleep(reconnect_delay)
                         reconnect_delay = min(reconnect_delay * 2, self._max_reconnect_delay)
                         
@@ -249,6 +253,7 @@ class OptimizedTcpClient:
                 break
             except Exception as e:
                 LOGGER.error("Main loop error: %s", e)
+                self.is_connected = False
                 await asyncio.sleep(reconnect_delay)
             finally:
                 # 确保连接正确关闭
@@ -299,9 +304,9 @@ class OptimizedTcpClient:
                 break
     
     # 委托给状态管理器的方法
-    async def sync_device_async(self, force=False, interval=180):
-        """设备同步 - 委托给状态管理器"""
-        await self._state_manager.sync_all_devices(force, interval)
+    async def sync_device_async(self, force=False, interval=180, page=1, page_size=None, search_keyword=None):
+        """设备同步 - 委托给状态管理器，支持分页和搜索"""
+        await self._state_manager.sync_all_devices(force, interval, page, page_size, search_keyword)
     
     async def sync_device_state_async(self, state: State):
         """状态同步 - 发送单个设备状态，使用原有SyncState格式"""
@@ -355,9 +360,16 @@ class OptimizedTcpClient:
     
     # 保持所有消息处理函数不变
     async def on_sync_device(self, jdata):
-        """设备同步请求"""
+        """设备同步请求 - 支持分页和搜索"""
         LOGGER.info("sync devices:%s", jdata)
-        await self.sync_device_async(True)
+        
+        # 检查是否包含分页和搜索参数
+        payload = jdata.get('Payload', {})
+        page = payload.get('page', 1)
+        page_size = payload.get('page_size', None)  # None表示不分页
+        search_keyword = payload.get('search_keyword', None)  # 搜索关键字
+        
+        await self.sync_device_async(True, page=page, page_size=page_size, search_keyword=search_keyword)
     
     async def on_device_control(self, jdata):
         """设备控制 - 非阻塞实现"""

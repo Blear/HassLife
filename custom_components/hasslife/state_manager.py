@@ -139,8 +139,8 @@ class StateSyncManager:
                 
         return False
     
-    async def sync_all_devices(self, force=False, interval=180):
-        """同步所有设备 - 精简attributes只保留friendly_name，保持消息格式不变"""
+    async def sync_all_devices(self, force=False, interval=180, page=1, page_size=None, search_keyword=None):
+        """同步所有设备 - 支持分页、搜索和实时发送"""
         now = time.time()
         if not force and (now - self._last_device_sync < interval):
             return
@@ -160,27 +160,67 @@ class StateSyncManager:
                 # 精简attributes，只保留friendly_name
                 original_attrs = dinfo.get('attributes', {})
                 filtered_attrs = {}
+                friendly_name = ""
                 if 'friendly_name' in original_attrs:
-                    filtered_attrs['friendly_name'] = original_attrs['friendly_name']
+                    friendly_name = original_attrs['friendly_name']
+                    filtered_attrs['friendly_name'] = friendly_name
+                
+                # 搜索过滤
+                if search_keyword:
+                    keyword = search_keyword.lower()
+                    entity_id_lower = entity_id.lower()
+                    friendly_name_lower = friendly_name.lower()
+                    
+                    # 匹配entity_id或friendly_name
+                    if keyword not in entity_id_lower and keyword not in friendly_name_lower:
+                        continue
                 
                 # 创建新的设备信息，保持原有格式但精简attributes
                 filtered_device = dict(dinfo)
                 filtered_device['attributes'] = filtered_attrs
                 usefull_entity.append(filtered_device)
         
-        # 即使没有设备也发送空数组
-        jlist = json.dumps(usefull_entity, sort_keys=True, cls=JSONEncoder, default=str)
-        
-        body = {
-            'Type': 'SyncDevice',
-            'Payload': {
-                'Username': self.client.get_login_info()['username'],
-                'Password': self.client.get_login_info()['password'],
-                'Version': self.client.get_login_info()['version'],
-                'List': jlist
+        # 分页处理
+        total_count = len(usefull_entity)
+        if page_size is not None:
+            # 计算分页
+            start_idx = (page - 1) * page_size
+            end_idx = start_idx + page_size
+            paginated_devices = usefull_entity[start_idx:end_idx]
+            
+            # 实时发送分页数据
+            jlist = json.dumps(paginated_devices, sort_keys=True, cls=JSONEncoder, default=str)
+            body = {
+                'Type': 'SyncDevice',
+                'Payload': {
+                    'Username': self.client.get_login_info()['username'],
+                    'Password': self.client.get_login_info()['password'],
+                    'Version': self.client.get_login_info()['version'],
+                    'List': jlist,
+                    'TotalCount': total_count,
+                    'Page': page,
+                    'PageSize': page_size,
+                    'HasMore': end_idx < total_count
+                }
             }
-        }
+        else:
+            # 不分页，发送全部数据
+            jlist = json.dumps(usefull_entity, sort_keys=True, cls=JSONEncoder, default=str)
+            body = {
+                'Type': 'SyncDevice',
+                'Payload': {
+                    'Username': self.client.get_login_info()['username'],
+                    'Password': self.client.get_login_info()['password'],
+                    'Version': self.client.get_login_info()['version'],
+                    'List': jlist,
+                    'TotalCount': total_count,
+                    'Page': 1,
+                    'PageSize': total_count,
+                    'HasMore': False
+                }
+            }
         
+        # 实时发送，不经过队列
         await self.client.send_message_async(body)
     
     def get_sync_stats(self) -> Dict[str, int]:

@@ -16,7 +16,7 @@ class HassLifeConfigs:
 
     config_release = {
         'server': {
-            'host': "server.blear.cn",
+            'host': "hass.blear.cn",
             'port': 4448,
             'bufsize': 1024
         }
