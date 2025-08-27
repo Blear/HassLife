@@ -139,8 +139,8 @@ class StateSyncManager:
                 
         return False
     
-    async def sync_all_devices(self, force=False, interval=180, page=1, page_size=None, search_keyword=None):
-        """同步所有设备 - 支持分页、搜索和实时发送"""
+    async def sync_all_devices(self, force=False, interval=180, page=1, page_size=None, search_keyword=None, request_id=''):
+        """同步所有设备 - 支持分页、搜索、请求ID和实时发送"""
         now = time.time()
         if not force and (now - self._last_device_sync < interval):
             return
@@ -231,6 +231,10 @@ class StateSyncManager:
                 }
             }
         
+        # 包含请求ID在响应中（如果有）
+        if request_id:
+            body['RequestID'] = request_id
+            
         # 实时发送，不经过队列
         await self.client.send_message_async(body)
     

@@ -304,9 +304,9 @@ class OptimizedTcpClient:
                 break
     
     # 委托给状态管理器的方法
-    async def sync_device_async(self, force=False, interval=180, page=1, page_size=None, search_keyword=None):
-        """设备同步 - 委托给状态管理器，支持分页和搜索"""
-        await self._state_manager.sync_all_devices(force, interval, page, page_size, search_keyword)
+    async def sync_device_async(self, force=False, interval=180, page=1, page_size=None, search_keyword=None, request_id=''):
+        """设备同步 - 委托给状态管理器，支持分页、搜索和请求ID"""
+        await self._state_manager.sync_all_devices(force, interval, page, page_size, search_keyword, request_id)
     
     async def sync_device_state_async(self, state: State):
         """状态同步 - 发送单个设备状态，使用原有SyncState格式"""
@@ -360,8 +360,11 @@ class OptimizedTcpClient:
     
     # 保持所有消息处理函数不变
     async def on_sync_device(self, jdata):
-        """设备同步请求 - 支持分页和搜索"""
+        """设备同步请求 - 支持分页和搜索，包含请求ID"""
         LOGGER.info("sync devices:%s", jdata)
+        
+        # 获取请求ID用于响应匹配
+        request_id = jdata.get('RequestID', '')
         
         # 检查是否包含分页和搜索参数
         payload = jdata.get('Payload', {})
@@ -369,7 +372,8 @@ class OptimizedTcpClient:
         page_size = payload.get('page_size', None)  # None表示不分页
         search_keyword = payload.get('search_keyword', None)  # 搜索关键字
         
-        await self.sync_device_async(True, page=page, page_size=page_size, search_keyword=search_keyword)
+        # 执行设备同步
+        await self.sync_device_async(True, page=page, page_size=page_size, search_keyword=search_keyword, request_id=request_id)
     
     async def on_device_control(self, jdata):
         """设备控制 - 非阻塞实现"""
