@@ -180,6 +180,9 @@ class StateSyncManager:
                 filtered_device['attributes'] = filtered_attrs
                 usefull_entity.append(filtered_device)
         
+        # 按entity_id排序
+        usefull_entity.sort(key=lambda x: x['entity_id'])
+        
         # 分页处理
         total_count = len(usefull_entity)
         if page_size is not None:
