@@ -36,7 +36,7 @@ Home Assistant的组件
 可以手动添加帐号配置，然后重启HomeAssistent
 
 ## 使用步骤：
-	1.注册HassLife账号 打开[HassLife https://hass.blear.cn](https://hass.blear.cn) ,注册账号并登录
+	1.注册HassLife账号 打开https://hass.blear.cn ,注册账号并登录
 	2.安装插件：安装完重启HomeAssistant，然后去到添加集成页面，添加HassLife集成，并登录HassLife账号。
 	3.继续回到HassLife网站页面，如果你的插件配置没问题，个人中心页面会显示插件状态为`在线`
 	4.点击设备管理菜单，点击右侧绿色的`添加Homeassistant设备`按钮，勾选你要添加接入的设备并提交
