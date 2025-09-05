@@ -320,12 +320,17 @@ class OptimizedTcpClient:
         if entity_id not in self.entity_ids:
             return
             
-        LOGGER.info("上报设备状态: %s = %s", entity_id, state.state)
+        LOGGER.debug("上报设备状态: %s = %s", entity_id, state.state)
+        # 只取需要的字段
+        state_dict = {
+            "attributes": state.attributes,
+            "entity_id": state.entity_id,
+            "state": state.state,
+        }
         
-        # 使用原有格式序列化状态
         from homeassistant.helpers.json import JSONEncoder
         import json
-        State = json.dumps(state.as_dict(), sort_keys=True, cls=JSONEncoder, default=str)
+        State = json.dumps(state_dict, sort_keys=True, cls=JSONEncoder, default=str)
         
         login_info = self.get_login_info()
         if not login_info:
@@ -343,9 +348,6 @@ class OptimizedTcpClient:
         
         await self.send_message_async(body)
     
-    def _on_state_changed_optimized(self, event):
-        """优化状态变化处理 - 已废弃"""
-        pass
         
     async def _async_on_state_changed(self, event):
         """异步状态变化处理"""
