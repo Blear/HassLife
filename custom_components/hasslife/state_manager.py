@@ -20,12 +20,9 @@ class StateSyncManager:
         self.hass = hass
         self.client = client
         self.white_domains = set(white_domains)
-        
         # 状态缓存
-        self._last_device_sync = 0
-        self._last_states = {}
         self._pending_sync_states = set()
-        
+
         # 批量同步配置
         self._batch_interval = 0.5  # 500ms批量处理
         self._batch_size = 50  # 每批最多50个设备
@@ -139,14 +136,8 @@ class StateSyncManager:
                 
         return False
     
-    async def sync_all_devices(self, force=False, interval=180, page=1, page_size=None, search_keyword=None, request_id=''):
+    async def sync_all_devices(self, page=1, page_size=30, search_keyword=None, request_id=''):
         """同步所有设备 - 支持分页、搜索、请求ID和实时发送"""
-        now = time.time()
-        if not force and (now - self._last_device_sync < interval):
-            return
-            
-        self._last_device_sync = now
-        
         # 获取所有需要同步的设备
         devicelist = self.hass.states.async_all()
         all_devices = []
@@ -158,83 +149,53 @@ class StateSyncManager:
             domain = entity_id.split(".")[0]
             
             if domain in self.white_domains:
-                # 精简attributes，只保留friendly_name
-                original_attrs = dinfo.get('attributes', {})
-                filtered_attrs = {}
-                friendly_name = ""
-                if 'friendly_name' in original_attrs:
-                    friendly_name = original_attrs['friendly_name']
-                    filtered_attrs['friendly_name'] = friendly_name
-                
-                # 创建新的设备信息，保持原有格式但精简attributes
-                filtered_device = dict(dinfo)
-                filtered_device['attributes'] = filtered_attrs
-                all_devices.append((filtered_device, entity_id, friendly_name))
-        
+                # 只保留 entity_id 和 attributes.friendly_name,精简数据格式
+                friendly_name = dinfo.get('attributes', {}).get('friendly_name', "")
+                filtered_device = {
+                    'entity_id': entity_id,
+                    'attributes': {
+                        'friendly_name': friendly_name
+                    }
+                }
+                all_devices.append(filtered_device)
         # 按entity_id排序
-        all_devices.sort(key=lambda x: x[1])
+        all_devices.sort(key=lambda x: x['entity_id'])
         
         # 第二步：搜索过滤（如果有搜索条件）
         if search_keyword:
             keyword = search_keyword.lower()
-            filtered_devices = []
-            for device, entity_id, friendly_name in all_devices:
-                entity_id_lower = entity_id.lower()
-                friendly_name_lower = friendly_name.lower()
-                
-                # 匹配entity_id或friendly_name
-                if keyword in entity_id_lower or keyword in friendly_name_lower:
-                    filtered_devices.append(device)
-            
-            # 搜索结果
-            usefull_entity = filtered_devices
-            total_count = len(filtered_devices)
+            usefull_entity = [
+                device for device in all_devices
+                if keyword in device['entity_id'].lower() or keyword in device['attributes']['friendly_name'].lower()
+            ]
+            total_count = len(usefull_entity)
         else:
             # 无搜索条件，使用所有设备
-            usefull_entity = [device for device, _, _ in all_devices]
+            usefull_entity = all_devices
             total_count = len(all_devices)
-        if page_size is not None:
-            # 计算分页
-            start_idx = (page - 1) * page_size
-            end_idx = start_idx + page_size
-            paginated_devices = usefull_entity[start_idx:end_idx]
-            
-            # 实时发送分页数据
-            jlist = json.dumps(paginated_devices, sort_keys=True, cls=JSONEncoder, default=str)
-            body = {
-                'Type': 'SyncDevice',
-                'Payload': {
-                    'Username': self.client.get_login_info()['username'],
-                    'Password': self.client.get_login_info()['password'],
-                    'Version': self.client.get_login_info()['version'],
-                    'List': jlist,
-                    'TotalCount': total_count,
-                    'Page': page,
-                    'PageSize': page_size,
-                    'HasMore': end_idx < total_count
-                }
+        # 计算分页
+        start_idx = (page - 1) * page_size
+        end_idx = start_idx + page_size
+        paginated_devices = usefull_entity[start_idx:end_idx]
+        send_list = paginated_devices
+        has_more = end_idx < total_count
+        jlist = json.dumps(send_list, sort_keys=True, cls=JSONEncoder, default=str)
+        body = {
+            'Type': 'SyncDevice',
+            'Payload': {
+                'Username': self.client.get_login_info()['username'],
+                'Password': self.client.get_login_info()['password'],
+                'Version': self.client.get_login_info()['version'],
+                'List': jlist,
+                'TotalCount': total_count,
+                'Page': page,
+                'PageSize': page_size if page_size is not None else total_count,
+                'HasMore': has_more
             }
-        else:
-            # 不分页，发送全部数据
-            jlist = json.dumps(usefull_entity, sort_keys=True, cls=JSONEncoder, default=str)
-            body = {
-                'Type': 'SyncDevice',
-                'Payload': {
-                    'Username': self.client.get_login_info()['username'],
-                    'Password': self.client.get_login_info()['password'],
-                    'Version': self.client.get_login_info()['version'],
-                    'List': jlist,
-                    'TotalCount': total_count,
-                    'Page': 1,
-                    'PageSize': total_count,
-                    'HasMore': False
-                }
-            }
-        
+        }
         # 包含请求ID在响应中（如果有）
         if request_id:
             body['RequestID'] = request_id
-            
         # 实时发送，不经过队列
         await self.client.send_message_async(body)
     
@@ -242,6 +203,4 @@ class StateSyncManager:
         """获取同步统计信息"""
         return {
             "pending_sync_count": len(self._pending_sync_states),
-            "last_device_sync": int(self._last_device_sync),
-            "cached_state_count": len(self._last_states)
         }
