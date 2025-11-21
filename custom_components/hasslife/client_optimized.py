@@ -20,7 +20,7 @@ from .state_manager import StateSyncManager
 
 
 class OptimizedTcpClient:
-    white_domains = ['button','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','automation','group','lock']
+    white_domains = ['button','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','input_button','automation','group','lock']
     protocol_func_bind_map = {}
     is_exited = False
     
@@ -476,7 +476,7 @@ class OptimizedTcpClient:
         """获取设备域"""
         return entity_id.split(".")[0]
     
-    def stop(self):
+    async def stop(self):
         """停止客户端 - 最佳实践"""
         LOGGER.info("Stopping OptimizedTcpClient...")
         self.is_exited = True
@@ -499,6 +499,6 @@ class OptimizedTcpClient:
         
         # 异步关闭连接
         if hasattr(self.hass, 'is_running') and self.hass.is_running:
-            asyncio.create_task(self.close_connection())
+            await self.close_connection()
         
         LOGGER.info("OptimizedTcpClient stopped")
