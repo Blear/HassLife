@@ -8,6 +8,7 @@ import struct
 import json
 import hashlib
 import traceback
+import random
 from typing import Optional, Dict, List, Any
 from homeassistant.const import EVENT_STATE_CHANGED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, State
@@ -20,7 +21,7 @@ from .state_manager import StateSyncManager
 
 
 class OptimizedTcpClient:
-    white_domains = ['button','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','input_button','automation','group','lock']
+    white_domains = ['button','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','input_button','scene','automation','group','lock']
     protocol_func_bind_map = {}
     is_exited = False
     
@@ -40,14 +41,15 @@ class OptimizedTcpClient:
         # 优化配置参数
         self.heartbeat_interval = 10
         self.heartbeat_timeout = 60
-        
+        self._last_pong_time=time.time()
         # 消息队列
         self._message_queue = asyncio.Queue(maxsize=1000)
         self._sender_task: Optional[asyncio.Task] = None
         self._receiver_task: Optional[asyncio.Task] = None
-        
+        self._heartbeat_task: Optional[asyncio.Task] = None
         # 连接管理
-        self._reconnect_delay = 5
+        self._retry_count = 0
+        self._base_reconnect_delay = 2
         self._max_reconnect_delay = 300
         self._connection_lock = asyncio.Lock()
         
@@ -58,29 +60,42 @@ class OptimizedTcpClient:
         """异步连接 - 非阻塞实现"""
         if self.is_connected:
             return True
-            
+        if self._retry_count > 0:
+            base = min(
+                self._base_reconnect_delay * (2 ** (self._retry_count - 1)),
+                self._max_reconnect_delay,
+            )
+            jitter = random.uniform(0, base * 0.5)
+            delay = base + jitter
+            LOGGER.warning(
+                "Reconnect backoff retry=%d delay=%.2fs",
+                self._retry_count,
+                delay,
+            )
+            await asyncio.sleep(delay)
         try:
             async with asyncio.timeout(5):
                 self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
             self.is_connected = True
+            self._retry_count = 0
             LOGGER.info("Connected to: %s:%d", self.host, self.port)
             return True
-        except asyncio.TimeoutError:
-            self.is_connected = False
-            LOGGER.error("Connection timeout to %s:%d", self.host, self.port)
-            return False
         except Exception as e:
             self.is_connected = False
+            self._retry_count += 1
             LOGGER.error("Failed to connect: %s", traceback.format_exc())
             return False
     
-    async def send_message_async(self, message: Dict[str, Any]) -> bool:
+    async def send_message_async(self, message: Dict[str, Any], timeout: float = 1.0) -> bool:
         """异步发送消息 - 加入队列"""
+        if not self.is_connected:
+            LOGGER.warning("Not connected, dropping message: %s", message.get("Type"))
+            return False
         try:
-            await self._message_queue.put(message)
+            await asyncio.wait_for(self._message_queue.put(message), timeout=timeout)
             return True
-        except asyncio.QueueFull:
-            LOGGER.error("Message queue full, dropping: %s", message.get("Type"))
+        except asyncio.TimeoutError:
+            LOGGER.error("Message queue full, dropping message: %s. Consider increasing queue size or processing speed.", message.get("Type"))
             return False
     
     async def _send_worker(self):
@@ -205,68 +220,58 @@ class OptimizedTcpClient:
     
     async def _main_loop(self):
         """主循环"""
-        reconnect_delay = self._reconnect_delay
         LOGGER.info("Starting main loop with host: %s:%d", self.host, self.port)
-        
+        await asyncio.sleep(random.uniform(0, 5))
         while not self.is_exited:
             try:
                 async with self._connection_lock:
-                    LOGGER.debug("Attempting connection, is_connected=%s", self.is_connected)
-                    if await self.connect():
-                        # 启动工作协程
-                        self._sender_task = asyncio.create_task(self._send_worker())
-                        self._receiver_task = asyncio.create_task(self._receive_worker())
-                        heartbeat_task = asyncio.create_task(self.heartbeat_async())
-                        
-                        try:
-                            while self.is_connected and not self.is_exited:
-                                await asyncio.sleep(1)
-                        finally:
-                            # 清理连接
-                            self.is_connected = False
-                            if self.writer:
-                                try:
-                                    self.writer.close()
-                                    await self.writer.wait_closed()
-                                except Exception:
-                                    pass
-                                finally:
-                                    self.writer = None
-                                    self.reader = None
-                            
-                            # 清理任务
-                            for task in [self._sender_task, self._receiver_task, heartbeat_task]:
-                                if task and not task.done():
-                                    task.cancel()
-                                    try:
-                                        await task
-                                    except asyncio.CancelledError:
-                                        pass
-                        
-                        reconnect_delay = self._reconnect_delay
-                    else:
-                        LOGGER.info("Connection failed, reconnecting in %d seconds...", reconnect_delay)
-                        await asyncio.sleep(reconnect_delay)
-                        reconnect_delay = min(reconnect_delay * 2, self._max_reconnect_delay)
-                        
+                    ok = await self.connect()
+                if not ok:
+                    await asyncio.sleep(1)
+                    continue
+                self._sender_task = asyncio.create_task(self._send_worker())
+                self._receiver_task = asyncio.create_task(self._receive_worker())
+                self._heartbeat_task = asyncio.create_task(self.heartbeat_async())
+                try:
+                    while self.is_connected and not self.is_exited:
+                        await asyncio.sleep(1)
+                finally:
+                    self.is_connected = False
+                    try:
+                        await self._cleanup_tasks(self._sender_task,self._receiver_task,self._heartbeat_task)
+                    except Exception as e:
+                        LOGGER.debug("Cleanup tasks error: %s", e)
+                    try:
+                        await self.close_connection()
+                    except Exception as e:
+                        LOGGER.debug("Close connection error: %s", e)
+                    
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 LOGGER.error("Main loop error: %s", e)
                 self.is_connected = False
-                await asyncio.sleep(reconnect_delay)
+
+    async def _cleanup_tasks(self, *tasks):
+        for task in tasks:
+            if task and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+
+    async def close_connection(self):
+        if self.writer:
+            try:
+                self.writer.close()
+                await self.writer.wait_closed()
+            except Exception:
+                pass
             finally:
-                # 确保连接正确关闭
-                if self.writer:
-                    try:
-                        self.writer.close()
-                        await self.writer.wait_closed()
-                    except Exception:
-                        pass
-                    finally:
-                        self.writer = None
-                        self.reader = None
-    
+                self.writer = None
+                self.reader = None
+
     async def _receive_worker(self):
         """消息接收工作协程 - 防止阻塞"""
         while not self.is_exited:
@@ -297,7 +302,9 @@ class OptimizedTcpClient:
                     await self.send_message_async({"Type": "Ping"})
                 except Exception:
                     self.is_connected = False
-            
+            if time.time() - self._last_pong_time > self.heartbeat_timeout:
+                LOGGER.warning("Heartbeat timeout, marking connection as disconnected")
+                self.is_connected = False
             try:
                 await asyncio.sleep(self.heartbeat_interval)
             except asyncio.CancelledError:
@@ -328,9 +335,7 @@ class OptimizedTcpClient:
             "state": state.state,
         }
         
-        from homeassistant.helpers.json import JSONEncoder
-        import json
-        State = json.dumps(state_dict, sort_keys=True, cls=JSONEncoder, default=str)
+        state_json = json.dumps(state_dict, sort_keys=True, cls=JSONEncoder, default=str)
         
         login_info = self.get_login_info()
         if not login_info:
@@ -342,7 +347,7 @@ class OptimizedTcpClient:
                 'Username': login_info['username'],
                 'Password': login_info['password'],
                 'Version': login_info['version'],
-                'State': State
+                'State': state_json
             }
         }
         
@@ -437,6 +442,7 @@ class OptimizedTcpClient:
     
     async def process_json_pack(self, jdata):
         """消息处理"""
+        self._last_pong_time = time.time()
         LOGGER.debug("process_json_pack %s", str(jdata))
         if jdata['Type'] in self.protocol_func_bind_map:
             await self.protocol_func_bind_map[jdata['Type']](jdata)
@@ -486,16 +492,7 @@ class OptimizedTcpClient:
             self._state_manager.stop()
         
         # 取消所有任务
-        tasks_to_cancel = []
-        if hasattr(self, '_main_loop_task') and self._main_loop_task and not self._main_loop_task.done():
-            tasks_to_cancel.append(self._main_loop_task)
-        if hasattr(self, '_sender_task') and self._sender_task and not self._sender_task.done():
-            tasks_to_cancel.append(self._sender_task)
-        if hasattr(self, '_receiver_task') and self._receiver_task and not self._receiver_task.done():
-            tasks_to_cancel.append(self._receiver_task)
-        
-        for task in tasks_to_cancel:
-            task.cancel()
+        await self._cleanup_tasks(self._sender_task,self._receiver_task,self._heartbeat_task)
         
         # 异步关闭连接
         if hasattr(self.hass, 'is_running') and self.hass.is_running:
