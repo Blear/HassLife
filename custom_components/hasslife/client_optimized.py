@@ -44,6 +44,7 @@ class OptimizedTcpClient:
         self._last_pong_time=time.time()
         # 消息队列
         self._message_queue = asyncio.Queue(maxsize=1000)
+        self._main_loop_task = None
         self._sender_task: Optional[asyncio.Task] = None
         self._receiver_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
@@ -454,9 +455,14 @@ class OptimizedTcpClient:
             "UpdateEntitys": self.on_update_entitys,
             "Auth": self.on_auth,
             "Error": self.on_error,
-            "SyncDevice": self.on_sync_device
+            "SyncDevice": self.on_sync_device,
+            "Pong": self.on_pong
         }
-    
+    async def on_pong(self, jdata):
+        """处理服务器的心跳响应"""
+        self._last_pong_time = time.time()
+        LOGGER.debug("Received Pong response")
+
     def get_login_info(self):
         """获取登录信息"""
         if self._login_info:
@@ -492,7 +498,7 @@ class OptimizedTcpClient:
             self._state_manager.stop()
         
         # 取消所有任务
-        await self._cleanup_tasks(self._sender_task,self._receiver_task,self._heartbeat_task)
+        await self._cleanup_tasks(self._sender_task,self._receiver_task,self._heartbeat_task,self._main_loop_task)
         
         # 异步关闭连接
         if hasattr(self.hass, 'is_running') and self.hass.is_running:
