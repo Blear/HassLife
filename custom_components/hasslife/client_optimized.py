@@ -118,6 +118,12 @@ class OptimizedTcpClient:
 
     async def _connect_with_backoff(self):
         """异步连接 - 非阻塞实现"""
+        # 首次连接（_retry_count = 0）加一个小随机延迟，避免瞬时雪崩
+        if self._retry_count == 0:
+            initial_delay = random.uniform(0, 5)  # 0~5秒随机延迟
+            if initial_delay > 0:
+                LOGGER.info("Initial connection random delay: %.2fs", initial_delay)
+                await asyncio.sleep(initial_delay)
         if self._retry_count > 0:
             base = min(
                 self._base_reconnect_delay * (2 ** (self._retry_count - 1)),
