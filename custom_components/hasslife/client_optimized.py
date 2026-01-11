@@ -9,58 +9,115 @@ import json
 import hashlib
 import traceback
 import random
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, Any
 from homeassistant.const import EVENT_STATE_CHANGED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.json import JSONEncoder
 
-from .const import BUFFER_SIZE
+from .const import VERSION
 from .hasslife_config import HASSLIFE_CONFIGS
-from .utils import LOGGER, dns_open, get_rand_char, save_local_seed
+from .utils import LOGGER
 from .state_manager import StateSyncManager
 
 
 class OptimizedTcpClient:
     white_domains = ['button','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','input_button','scene','automation','group','lock']
-    protocol_func_bind_map = {}
     is_exited = False
     
     def __init__(self, host: str, port: int, hass: HomeAssistant):
         self.host = host
         self.port = port
         self.hass = hass
+        
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
+        
         self.is_connected = False
         self.is_init = True
+        self._connection_lock = asyncio.Lock()
+        self._disconnect_event = asyncio.Event()
+        # 消息队列
+        self._message_queue = asyncio.Queue(maxsize=1000)
+        self._sender_task: Optional[asyncio.Task] = None
+        self._receiver_task: Optional[asyncio.Task] = None
+        self._heartbeat_task: Optional[asyncio.Task] = None
+        self._main_loop_task: Optional[asyncio.Task] = None
         
-        self._login_info = {}
-        self.init_func_bind_map()
+        self._login_info: Dict[str, Any] = {}
         self.entity_ids = []
         
         # 优化配置参数
         self.heartbeat_interval = 10
         self.heartbeat_timeout = 60
         self._last_pong_time=time.time()
-        # 消息队列
-        self._message_queue = asyncio.Queue(maxsize=1000)
-        self._main_loop_task = None
-        self._sender_task: Optional[asyncio.Task] = None
-        self._receiver_task: Optional[asyncio.Task] = None
-        self._heartbeat_task: Optional[asyncio.Task] = None
+
         # 连接管理
         self._retry_count = 0
         self._base_reconnect_delay = 2
         self._max_reconnect_delay = 300
-        self._connection_lock = asyncio.Lock()
-        
+
+        self.protocol_func_bind_map = {}
+        self.init_func_bind_map()
+
         # 状态同步管理器
         self._state_manager = StateSyncManager(hass, self, self.white_domains)
-    
-    async def connect(self) -> bool:
+
+    async def start(self):
+        """启动客户端 - 最佳实践"""
+        LOGGER.info("Starting OptimizedTcpClient")
+        self._state_manager.start()
+        self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_on_state_changed)
+        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
+        self._main_loop_task = asyncio.create_task(self._main_loop())
+
+    async def stop(self):
+        """停止客户端 - 最佳实践"""
+        LOGGER.info("Stopping OptimizedTcpClient")
+        self.is_exited = True
+        self._disconnect_event.set()
+
+        self._state_manager.stop()
+
+        await self._cleanup_tasks(
+            self._sender_task,
+            self._receiver_task,
+            self._heartbeat_task,
+            self._main_loop_task,
+        )
+
+        await self._close_connection()
+        LOGGER.info("OptimizedTcpClient stopped")
+
+    async def _on_hass_stop(self, _):
+        await self.stop()
+
+    async def _main_loop(self):
+        """主循环"""
+        await asyncio.sleep(random.uniform(0, 5))
+        while not self.is_exited:
+            try:
+                await self._connect_with_backoff()
+                self._disconnect_event.clear() 
+                self._last_pong_time = time.time()
+                self._sender_task = asyncio.create_task(self._send_worker())
+                self._receiver_task = asyncio.create_task(self._receive_worker())
+                self._heartbeat_task = asyncio.create_task(self._heartbeat_worker())
+                await self._disconnect_event.wait()
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                LOGGER.error("Main loop error:\n%s", traceback.format_exc())
+            finally:
+                await self._cleanup_tasks(
+                    self._sender_task,
+                    self._receiver_task,
+                    self._heartbeat_task,
+                )
+                await self._close_connection()
+                self._clear_message_queue()
+
+    async def _connect_with_backoff(self):
         """异步连接 - 非阻塞实现"""
-        if self.is_connected:
-            return True
         if self._retry_count > 0:
             base = min(
                 self._base_reconnect_delay * (2 ** (self._retry_count - 1)),
@@ -74,184 +131,100 @@ class OptimizedTcpClient:
                 delay,
             )
             await asyncio.sleep(delay)
-        try:
-            async with asyncio.timeout(5):
-                self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
-            self.is_connected = True
-            self._retry_count = 0
-            LOGGER.info("Connected to: %s:%d", self.host, self.port)
-            return True
-        except Exception as e:
-            self.is_connected = False
-            self._retry_count += 1
-            LOGGER.error("Failed to connect: %s", traceback.format_exc())
-            return False
-    
-    async def send_message_async(self, message: Dict[str, Any], timeout: float = 1.0) -> bool:
-        """异步发送消息 - 加入队列"""
-        if not self.is_connected:
-            LOGGER.warning("Not connected, dropping message: %s", message.get("Type"))
-            return False
-        try:
-            await asyncio.wait_for(self._message_queue.put(message), timeout=timeout)
-            return True
-        except asyncio.TimeoutError:
-            LOGGER.error("Message queue full, dropping message: %s. Consider increasing queue size or processing speed.", message.get("Type"))
-            return False
-    
+        async with self._connection_lock:
+            try:
+                async with asyncio.timeout(5):
+                    self.reader, self.writer = await asyncio.open_connection(self.host, self.port)
+                self._retry_count = 0
+                LOGGER.info("Connected to %s:%s", self.host, self.port)
+            except Exception:
+                self._retry_count += 1
+                raise
+
+    async def _close_connection(self):
+        if self.writer:
+            try:
+                self.writer.close()
+                await self.writer.wait_closed()
+            except Exception:
+                pass
+        self.writer = None
+        self.reader = None
+
     async def _send_worker(self):
         """消息发送工作协程 - 防阻塞"""
-        while not self.is_exited:
-            try:
-                if not self.is_connected:
-                    await asyncio.sleep(1)
-                    continue
-                
-                try:
-                    message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
-                    
-                if not self.is_connected:
-                    continue
-                
-                await self._send_message_now(message)
-                
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                self.is_connected = False
-                await asyncio.sleep(1)
-    
-    async def _send_message_now(self, message: Dict[str, Any]) -> bool:
-        """立即发送消息 - 保持协议格式"""
-        if not self.is_connected or not self.writer:
-            return False
-            
         try:
-            async with asyncio.timeout(3):
-                # 保持原有消息格式不变
-                message_body = json.dumps(message, sort_keys=True, cls=JSONEncoder, default=str).encode('utf-8')
-                message_length = len(message_body)
-                
-                header_data = struct.pack('<I', message_length)
-                header_data = header_data.ljust(32, b'\x00')
-                
-                self.writer.write(header_data + message_body)
-                await self.writer.drain()
-                
-                LOGGER.debug("Sent: %s", message.get("Type"))
-                return True
-                
-        except Exception as e:
-            LOGGER.error("Send error: %s", e)
-            self.is_connected = False
-            return False
-    
-    async def receive_message_async(self) -> Optional[Dict[str, Any]]:
-        """异步接收消息 - 防阻塞实现"""
-        if not self.is_connected or not self.reader or self.reader.at_eof():
-            return None
-            
-        try:
-            async with asyncio.timeout(5):  # 减少超时时间
-                # 读取头部
-                try:
-                    header_data = await self.reader.readexactly(32)
-                except (asyncio.IncompleteReadError, ConnectionResetError, OSError) as e:
-                    self.is_connected = False
-                    return None
-                
-                if len(header_data) != 32:
-                    self.is_connected = False
-                    return None
-                
-                message_length = struct.unpack('<I', header_data[:4])[0]
-                if message_length <= 0 or message_length > 1024 * 1024:  # 限制1MB
-                    self.is_connected = False
-                    return None
-                
-                # 读取消息体
-                try:
-                    data = await self.reader.readexactly(message_length)
-                except (asyncio.IncompleteReadError, ConnectionResetError, OSError):
-                    self.is_connected = False
-                    return None
-                
-                if len(data) != message_length:
-                    self.is_connected = False
-                    return None
-                
-                try:
-                    return json.loads(data.decode('utf-8'))
-                except (json.JSONDecodeError, UnicodeDecodeError):
-                    return None
-                    
-        except asyncio.TimeoutError:
-            return None
+            while True:
+                msg = await self._message_queue.get()
+                await self._send_now(msg)
         except Exception:
-            self.is_connected = False
-            return None
-    
-    async def start(self):
-        """启动客户端 - 最佳实践"""
+            self._disconnect_event.set()
+
+    async def _receive_worker(self):
+        """消息接收工作协程 - 防止阻塞"""
         try:
-            # 启动状态管理器
-            self._state_manager.start()
-            
-            # 注册事件监听器 - 使用异步回调
-            self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_on_state_changed)
-            
-            # 立即在后台启动主循环（最佳实践）
-            self._main_loop_task = asyncio.create_task(self._main_loop())
-            
-            # 注册停止回调
-            self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_homeassistant_stop)
-            
-            LOGGER.info("OptimizedTcpClient started successfully")
-            
+            while True:
+                msg = await self._receive_one()
+                await self.process_json_pack(msg)
+        except Exception:
+            self._disconnect_event.set()
+
+    async def _heartbeat_worker(self):
+        """异步心跳 - 防阻塞"""
+        try:
+            while True:
+                await asyncio.sleep(self.heartbeat_interval)
+                await self.send_message_async({"Type": "Ping"})
+                if time.time() - self._last_pong_time > self.heartbeat_timeout:
+                    raise TimeoutError("heartbeat timeout")
+        except Exception:
+            self._disconnect_event.set()
+
+    async def send_message_async(self, message: Dict[str, Any]) -> bool:
+        """异步发送消息 - 加入队列"""
+        try:
+            await self._message_queue.put(message)
+            return True
+        except asyncio.QueueFull:
+            LOGGER.error("Message queue full, dropping: %s", message.get("Type"))
+            return False
+
+    async def _send_now(self, message: Dict[str, Any]) -> bool:
+        """立即发送消息 - 保持协议格式"""
+        if not self.writer:
+            return False
+        try:
+            body = json.dumps(message, cls=JSONEncoder).encode()
+            header = struct.pack("<I", len(body)).ljust(32, b"\x00")
+            self.writer.write(header + body)
+            await self.writer.drain()
+            return True
         except Exception as e:
-            LOGGER.error("Failed to start OptimizedTcpClient: %s", e)
+            LOGGER.error("Send failed: %s", e)
+            self._disconnect_event.set()
+            return False
+
+    async def _receive_one(self):
+        """异步接收消息 - 防阻塞实现"""
+        if not self.reader:
+            raise ConnectionError("Reader is None")
+        try:
+            header = await self.reader.readexactly(32)
+            size = struct.unpack("<I", header[:4])[0]
+            if size <= 0 or size > 1024 * 1024:
+                raise ValueError(f"invalid packet size: {size}")
+            body = await self.reader.readexactly(size)
+            return json.loads(body.decode())
+        except Exception:
+            self._disconnect_event.set()
             raise
-    
-    async def _on_homeassistant_stop(self, event):
-        """Homeassistant停止时的清理"""
-        await self.stop()
-    
-    
-    async def _main_loop(self):
-        """主循环"""
-        LOGGER.info("Starting main loop with host: %s:%d", self.host, self.port)
-        await asyncio.sleep(random.uniform(0, 5))
-        while not self.is_exited:
+
+    def _clear_message_queue(self):
+        while not self._message_queue.empty():
             try:
-                async with self._connection_lock:
-                    ok = await self.connect()
-                if not ok:
-                    await asyncio.sleep(1)
-                    continue
-                self._sender_task = asyncio.create_task(self._send_worker())
-                self._receiver_task = asyncio.create_task(self._receive_worker())
-                self._heartbeat_task = asyncio.create_task(self.heartbeat_async())
-                try:
-                    while self.is_connected and not self.is_exited:
-                        await asyncio.sleep(1)
-                finally:
-                    self.is_connected = False
-                    try:
-                        await self._cleanup_tasks(self._sender_task,self._receiver_task,self._heartbeat_task)
-                    except Exception as e:
-                        LOGGER.debug("Cleanup tasks error: %s", e)
-                    try:
-                        await self.close_connection()
-                    except Exception as e:
-                        LOGGER.debug("Close connection error: %s", e)
-                    
-            except asyncio.CancelledError:
+                self._message_queue.get_nowait()
+            except Exception:
                 break
-            except Exception as e:
-                LOGGER.error("Main loop error: %s", e)
-                self.is_connected = False
 
     async def _cleanup_tasks(self, *tasks):
         for task in tasks:
@@ -262,192 +235,6 @@ class OptimizedTcpClient:
                 except asyncio.CancelledError:
                     pass
 
-    async def close_connection(self):
-        if self.writer:
-            try:
-                self.writer.close()
-                await self.writer.wait_closed()
-            except Exception:
-                pass
-            finally:
-                self.writer = None
-                self.reader = None
-
-    async def _receive_worker(self):
-        """消息接收工作协程 - 防止阻塞"""
-        while not self.is_exited:
-            try:
-                if not self.is_connected or not self.reader or self.reader.at_eof():
-                    await asyncio.sleep(1)
-                    continue
-                    
-                message = await self.receive_message_async()
-                if message and "Type" in message:
-                    await self.process_json_pack(message)
-                elif not self.is_connected:
-                    # 连接已断开，等待重连
-                    await asyncio.sleep(1)
-                    
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                LOGGER.debug("Receive worker handled error: %s", e)
-                self.is_connected = False
-                await asyncio.sleep(1)
-    
-    async def heartbeat_async(self):
-        """异步心跳 - 防阻塞"""
-        while not self.is_exited:
-            if self.is_connected and self.writer and not self.writer.is_closing():
-                try:
-                    await self.send_message_async({"Type": "Ping"})
-                except Exception:
-                    self.is_connected = False
-            if time.time() - self._last_pong_time > self.heartbeat_timeout:
-                LOGGER.warning("Heartbeat timeout, marking connection as disconnected")
-                self.is_connected = False
-            try:
-                await asyncio.sleep(self.heartbeat_interval)
-            except asyncio.CancelledError:
-                break
-    
-    # 委托给状态管理器的方法
-    async def sync_device_async(self,  page=1, page_size=30, search_keyword=None, request_id=''):
-        """设备同步 - 委托给状态管理器，支持分页、搜索和请求ID"""
-        await self._state_manager.sync_all_devices(page, page_size, search_keyword, request_id)
-    
-    async def sync_device_state_async(self, state: State):
-        """状态同步 - 发送单个设备状态，使用原有SyncState格式"""
-        if not state:
-            return
-            
-        if not hasattr(self, 'entity_ids') or not self.entity_ids:
-            return
-            
-        entity_id = state.entity_id
-        if entity_id not in self.entity_ids:
-            return
-            
-        LOGGER.debug("上报设备状态: %s = %s", entity_id, state.state)
-        # 只取需要的字段
-        state_dict = {
-            "attributes": state.attributes,
-            "entity_id": state.entity_id,
-            "state": state.state,
-        }
-        
-        state_json = json.dumps(state_dict, sort_keys=True, cls=JSONEncoder, default=str)
-        
-        login_info = self.get_login_info()
-        if not login_info:
-            return
-            
-        body = {
-            'Type': 'SyncState',
-            'Payload': {
-                'Username': login_info['username'],
-                'Password': login_info['password'],
-                'Version': login_info['version'],
-                'State': state_json
-            }
-        }
-        
-        await self.send_message_async(body)
-    
-        
-    async def _async_on_state_changed(self, event):
-        """异步状态变化处理"""
-        new_state = event.data.get("new_state")
-        old_state = event.data.get("old_state")
-        
-        if new_state:
-            LOGGER.debug("状态变化事件触发: %s", new_state.entity_id)
-            self._state_manager.on_state_changed(
-                new_state.entity_id, old_state, new_state
-            )
-    
-    # 保持所有消息处理函数不变
-    async def on_sync_device(self, jdata):
-        """设备同步请求 - 支持分页和搜索，包含请求ID"""
-        LOGGER.info("sync devices:%s", jdata)
-        
-        # 获取请求ID用于响应匹配
-        request_id = jdata.get('RequestID', '')
-        
-        # 检查是否包含分页和搜索参数
-        payload = jdata.get('Payload', {})
-        page = payload.get('page', 1)
-        page_size = payload.get('page_size', 30)  # None表示不分页
-        search_keyword = payload.get('search_keyword', None)  # 搜索关键字
-        
-        # 执行设备同步
-        await self.sync_device_async(page=page, page_size=page_size, search_keyword=search_keyword, request_id=request_id)
-    
-    async def on_device_control(self, jdata):
-        """设备控制 - 非阻塞实现"""
-        LOGGER.info("receive device state:%s", jdata)
-        jpayload = jdata['Payload']
-        rows = jpayload['Rows']
-        
-        tasks = []
-        for row in rows:
-            data = row.get("data")
-            try:
-                domain = row.get("domain")
-                service = row.get("service")
-                task = self.hass.services.async_call(domain, service, data, blocking=False)
-                tasks.append(task)
-            except Exception as e:
-                LOGGER.error("Error creating service call: %s", e)
-        
-        if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
-    
-    async def on_auth(self, jdata):
-        """认证处理"""
-        LOGGER.info("receive entitys:%s", jdata)
-        self._login_info = self.get_login_info()
-        if not self._login_info:
-            return
-            
-        body = {
-            'Type': 'Auth',
-            'Payload': {
-                'Username': self._login_info['username'],
-                'Password': self._login_info['password'],
-                'Version': self._login_info['version'],
-            }
-        }
-        await self.send_message_async(body)
-    
-    async def on_update_entitys(self, jdata):
-        """实体更新"""
-        LOGGER.info("receive entitys:%s", jdata)
-        jpayload = jdata['Payload']
-        try:
-            self.entity_ids = jpayload.get("entity_ids", [])
-        except Exception as e:
-            LOGGER.error("Error updating entity_ids: %s", e)
-    
-    async def on_error(self, jdata):
-        """错误处理"""
-        LOGGER.info("error:%s", jdata)
-        jpayload = jdata['Payload']
-        self.is_exited = True
-        await self.close_connection()
-        try:
-            msg = jpayload.get("msg")
-            LOGGER.error("error:%s", msg)
-        except Exception as e:
-            LOGGER.error("Error processing error message: %s", e)
-    
-    async def process_json_pack(self, jdata):
-        """消息处理"""
-        self._last_pong_time = time.time()
-        LOGGER.debug("process_json_pack %s", str(jdata))
-        if jdata['Type'] in self.protocol_func_bind_map:
-            await self.protocol_func_bind_map[jdata['Type']](jdata)
-    
     def init_func_bind_map(self):
         """初始化函数映射"""
         self.protocol_func_bind_map = {
@@ -458,50 +245,106 @@ class OptimizedTcpClient:
             "SyncDevice": self.on_sync_device,
             "Pong": self.on_pong
         }
+
+    async def process_json_pack(self, jdata):
+        """消息处理"""
+        self._last_pong_time = time.time()
+        handler = self.protocol_func_bind_map.get(jdata.get("Type"))
+        if handler:
+            await handler(jdata)
+    
+
     async def on_pong(self, jdata):
         """处理服务器的心跳响应"""
         self._last_pong_time = time.time()
-        LOGGER.debug("Received Pong response")
 
+    async def _async_on_state_changed(self, event):
+        """异步状态变化处理"""
+        new_state = event.data.get("new_state")
+        old_state = event.data.get("old_state")
+        
+        if new_state:
+            LOGGER.debug("状态变化事件触发: %s", new_state.entity_id)
+            self._state_manager.on_state_changed(
+                new_state.entity_id, old_state, new_state
+            )
+
+    # 委托给状态管理器的方法
+    async def sync_device_async(self,  page=1, page_size=30, search_keyword=None, request_id=''):
+        """设备同步 - 委托给状态管理器，支持分页、搜索和请求ID"""
+        await self._state_manager.sync_all_devices(page, page_size, search_keyword, request_id)
+    
+    async def sync_device_state_async(self, state: State):
+        if not state or state.entity_id not in self.entity_ids:
+            return
+
+        payload = {
+            "attributes": state.attributes,
+            "entity_id": state.entity_id,
+            "state": state.state,
+        }
+
+        login = self.get_login_info()
+        await self.send_message_async({
+            "Type": "SyncState",
+            "Payload": {
+                **login,
+                "State": json.dumps(payload, cls=JSONEncoder, default=str),
+            }
+        })
+
+    async def on_device_control(self, jdata):
+        rows = jdata.get("Payload", {}).get("Rows", [])
+        tasks = []
+        for row in rows:
+            try:
+                tasks.append(
+                    self.hass.services.async_call(
+                        row["domain"], row["service"], row.get("data"), blocking=False
+                    )
+                )
+            except Exception:
+                pass
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def on_update_entitys(self, jdata):
+        self.entity_ids = jdata.get("Payload", {}).get("entity_ids", [])
+
+    async def on_auth(self, jdata):
+        await self.send_message_async({
+            "Type": "Auth",
+            "Payload": self.get_login_info(),
+        })
+    
+    async def on_error(self, jdata):
+        """错误处理"""
+        LOGGER.error("Server error: %s", jdata)
+        self.is_exited = True
+        self._disconnect_event.set()
+
+    async def on_sync_device(self, jdata):
+        """设备同步请求 - 支持分页和搜索，包含请求ID"""
+        payload = jdata.get("Payload", {})
+        await self.sync_device_async(
+            payload.get("page", 1),
+            payload.get("page_size", 30),
+            payload.get("search_keyword"),
+            jdata.get("RequestID", ""),
+        )
+    
     def get_login_info(self):
         """获取登录信息"""
         if self._login_info:
             return self._login_info
-            
-        hassconfig = HASSLIFE_CONFIGS.get_config_object().get("hassconfig", {})
-        username = hassconfig.get("username", "")
-        password = hassconfig.get("password", "")
-        
-        # 使用统一的插件版本号
-        from .const import VERSION
-        version = VERSION
-        
-        password = hashlib.sha1(password.encode('utf-8')).hexdigest()
+
+        conf = HASSLIFE_CONFIGS.get_config_object().get("hassconfig", {})
         self._login_info = {
-            'username': username,
-            'password': password,
-            'version': version
+            "Username": conf.get("username", ""),
+            "Password": hashlib.sha1(conf.get("password", "").encode()).hexdigest(),
+            "Version": VERSION,
         }
         return self._login_info
     
-    def _get_domain(self, entity_id):
-        """获取设备域"""
-        return entity_id.split(".")[0]
+
     
-    async def stop(self):
-        """停止客户端 - 最佳实践"""
-        LOGGER.info("Stopping OptimizedTcpClient...")
-        self.is_exited = True
-        
-        # 停止状态管理器
-        if hasattr(self, '_state_manager'):
-            self._state_manager.stop()
-        
-        # 取消所有任务
-        await self._cleanup_tasks(self._sender_task,self._receiver_task,self._heartbeat_task,self._main_loop_task)
-        
-        # 异步关闭连接
-        if hasattr(self.hass, 'is_running') and self.hass.is_running:
-            await self.close_connection()
-        
-        LOGGER.info("OptimizedTcpClient stopped")
