@@ -123,8 +123,8 @@ class OptimizedTcpClient:
                 self._base_reconnect_delay * (2 ** (self._retry_count - 1)),
                 self._max_reconnect_delay,
             )
-            jitter = random.uniform(0, base * 0.5)
-            delay = base + jitter
+            random_factor = random.uniform(0.5, 1.5)
+            delay = base * random_factor
             LOGGER.warning(
                 "Reconnect backoff retry=%d delay=%.2fs",
                 self._retry_count,
