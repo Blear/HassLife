@@ -157,7 +157,8 @@ class OptimizedTcpClient:
             while True:
                 msg = await self._message_queue.get()
                 await self._send_now(msg)
-        except Exception:
+        except Exception as e:
+            LOGGER.error("_send_worker failed: %s", e)
             self._disconnect_event.set()
 
     async def _receive_worker(self):
@@ -166,7 +167,8 @@ class OptimizedTcpClient:
             while True:
                 msg = await self._receive_one()
                 await self.process_json_pack(msg)
-        except Exception:
+        except Exception as e:
+            LOGGER.error("_receive_worker failed: %s", e)
             self._disconnect_event.set()
 
     async def _heartbeat_worker(self):
@@ -177,7 +179,8 @@ class OptimizedTcpClient:
                 await self.send_message_async({"Type": "Ping"})
                 if time.time() - self._last_pong_time > self.heartbeat_timeout:
                     raise TimeoutError("heartbeat timeout")
-        except Exception:
+        except Exception as e:
+            LOGGER.error("_heartbeat_worker failed: %s", e)
             self._disconnect_event.set()
 
     async def send_message_async(self, message: Dict[str, Any]) -> bool:
@@ -198,9 +201,10 @@ class OptimizedTcpClient:
             header = struct.pack("<I", len(body)).ljust(32, b"\x00")
             self.writer.write(header + body)
             await self.writer.drain()
+            LOGGER.info("Sent: %s", message.get("Type"))
             return True
         except Exception as e:
-            LOGGER.error("Send failed: %s", e)
+            LOGGER.error("_send_now failed: %s", e)
             self._disconnect_event.set()
             return False
 
@@ -215,7 +219,8 @@ class OptimizedTcpClient:
                 raise ValueError(f"invalid packet size: {size}")
             body = await self.reader.readexactly(size)
             return json.loads(body.decode())
-        except Exception:
+        except Exception as e:
+            LOGGER.error("_receive_one failed: %s", e)
             self._disconnect_event.set()
             raise
 
@@ -248,6 +253,7 @@ class OptimizedTcpClient:
 
     async def process_json_pack(self, jdata):
         """消息处理"""
+        LOGGER.debug("process_json_pack %s", str(jdata))
         self._last_pong_time = time.time()
         handler = self.protocol_func_bind_map.get(jdata.get("Type"))
         if handler:
@@ -325,6 +331,7 @@ class OptimizedTcpClient:
 
     async def on_sync_device(self, jdata):
         """设备同步请求 - 支持分页和搜索，包含请求ID"""
+        LOGGER.info("sync devices:%s", jdata)
         payload = jdata.get("Payload", {})
         await self.sync_device_async(
             payload.get("page", 1),

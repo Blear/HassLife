@@ -183,9 +183,9 @@ class StateSyncManager:
         body = {
             'Type': 'SyncDevice',
             'Payload': {
-                'Username': self.client.get_login_info()['username'],
-                'Password': self.client.get_login_info()['password'],
-                'Version': self.client.get_login_info()['version'],
+                'Username': self.client.get_login_info()['Username'],
+                'Password': self.client.get_login_info()['Password'],
+                'Version': self.client.get_login_info()['Version'],
                 'List': jlist,
                 'TotalCount': total_count,
                 'Page': page,
@@ -197,7 +197,8 @@ class StateSyncManager:
         if request_id:
             body['RequestID'] = request_id
         # 实时发送，不经过队列
-        await self.client.send_message_async(body)
+        LOGGER.info("sync_device_async send %s", request_id)
+        await self.client._send_now(body)
     
     def get_sync_stats(self) -> Dict[str, int]:
         """获取同步统计信息"""
