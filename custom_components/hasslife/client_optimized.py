@@ -64,6 +64,9 @@ class OptimizedTcpClient:
 
     async def start(self):
         """启动客户端 - 最佳实践"""
+        if self._main_loop_task and not self._main_loop_task.done():
+            LOGGER.warning("OptimizedTcpClient already started, skip")
+            return
         LOGGER.info("Starting OptimizedTcpClient")
         self._state_manager.start()
         self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_on_state_changed)
@@ -114,6 +117,7 @@ class OptimizedTcpClient:
                     self._heartbeat_task,
                 )
                 await self._close_connection()
+                await asyncio.sleep(0.2)
                 self._clear_message_queue()
 
     async def _connect_with_backoff(self):
