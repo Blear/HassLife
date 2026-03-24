@@ -22,18 +22,17 @@ from .state_manager import StateSyncManager
 
 class OptimizedTcpClient:
     white_domains = ['button','light','cover','switch','vacuum','water_heater','humidifier','fan','media_player','script','climate','input_boolean','input_button','scene','automation','group','lock']
-    is_exited = False
-    
+
     def __init__(self, host: str, port: int, hass: HomeAssistant):
         self.host = host
         self.port = port
         self.hass = hass
-        
+
         self.reader: Optional[asyncio.StreamReader] = None
         self.writer: Optional[asyncio.StreamWriter] = None
-        
-        self.is_connected = False
-        self.is_init = True
+
+        # 实例变量，每个客户端独立
+        self._is_exited = False
         self._connection_lock = asyncio.Lock()
         self._disconnect_event = asyncio.Event()
         # 消息队列
@@ -42,10 +41,14 @@ class OptimizedTcpClient:
         self._receiver_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._main_loop_task: Optional[asyncio.Task] = None
-        
+
+        # 事件监听器引用，用于取消注册
+        self._state_changed_listener = None
+        self._hass_stop_listener = None
+
         self._login_info: Dict[str, Any] = {}
         self.entity_ids = []
-        
+
         # 优化配置参数
         self.heartbeat_interval = 10
         self.heartbeat_timeout = 60
@@ -64,19 +67,34 @@ class OptimizedTcpClient:
 
     async def start(self):
         """启动客户端 - 最佳实践"""
+        if self._main_loop_task and not self._main_loop_task.done():
+            LOGGER.warning("OptimizedTcpClient already started, skip")
+            return
         LOGGER.info("Starting OptimizedTcpClient")
+        self._is_exited = False  # 重置退出标志
+        self._disconnect_event.clear()
         self._state_manager.start()
-        self.hass.bus.async_listen(EVENT_STATE_CHANGED, self._async_on_state_changed)
-        self.hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, self._on_hass_stop)
+        # 保存监听器引用以便后续取消
+        self._state_changed_listener = self.hass.bus.async_listen(
+            EVENT_STATE_CHANGED, self._async_on_state_changed
+        )
+        self._hass_stop_listener = self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STOP, self._on_hass_stop
+        )
         self._main_loop_task = asyncio.create_task(self._main_loop())
 
     async def stop(self):
         """停止客户端 - 最佳实践"""
         LOGGER.info("Stopping OptimizedTcpClient")
-        self.is_exited = True
+        self._is_exited = True
         self._disconnect_event.set()
 
         self._state_manager.stop()
+
+        # 取消事件监听器
+        if self._state_changed_listener:
+            self._state_changed_listener()
+            self._state_changed_listener = None
 
         await self._cleanup_tasks(
             self._sender_task,
@@ -93,11 +111,10 @@ class OptimizedTcpClient:
 
     async def _main_loop(self):
         """主循环"""
-        await asyncio.sleep(random.uniform(0, 5))
-        while not self.is_exited:
+        while not self._is_exited:
             try:
                 await self._connect_with_backoff()
-                self._disconnect_event.clear() 
+                self._disconnect_event.clear()
                 self._last_pong_time = time.time()
                 self._sender_task = asyncio.create_task(self._send_worker())
                 self._receiver_task = asyncio.create_task(self._receive_worker())
@@ -116,13 +133,21 @@ class OptimizedTcpClient:
                 await self._close_connection()
                 self._clear_message_queue()
 
+                # 只在非正常退出时等待重连延迟
+                if not self._is_exited:
+                    # 重连前等待 5-10 秒，避免因服务器端会话未清理导致重复连接被踢
+                    reconnect_delay = random.uniform(5, 10)
+                    LOGGER.info("等待 %.2f 秒后重连...", reconnect_delay)
+                    await asyncio.sleep(reconnect_delay)
+
     async def _connect_with_backoff(self):
-        """异步连接 - 非阻塞实现"""
+        """异步连接 - 非阻塞实现，支持中断"""
         # 首次连接（_retry_count = 0）加一个小随机延迟，避免瞬时雪崩
         if self._retry_count == 0:
             initial_delay = random.uniform(0, 5)  # 0~5秒随机延迟
             if initial_delay > 0:
                 LOGGER.info("Initial connection random delay: %.2fs", initial_delay)
+                # 支持中断的延迟
                 await asyncio.sleep(initial_delay)
         if self._retry_count > 0:
             base = min(
@@ -136,7 +161,14 @@ class OptimizedTcpClient:
                 self._retry_count,
                 delay,
             )
-            await asyncio.sleep(delay)
+            # 支持中断的延迟：分段睡眠，每秒检查退出信号
+            remaining = delay
+            while remaining > 0 and not self._is_exited:
+                sleep_time = min(remaining, 1.0)
+                await asyncio.sleep(sleep_time)
+                remaining -= sleep_time
+            if self._is_exited:
+                raise asyncio.CancelledError("连接被中断")
         async with self._connection_lock:
             try:
                 async with asyncio.timeout(5):
@@ -183,8 +215,16 @@ class OptimizedTcpClient:
             while True:
                 await asyncio.sleep(self.heartbeat_interval)
                 await self.send_message_async({"Type": "Ping"})
-                if time.time() - self._last_pong_time > self.heartbeat_timeout:
-                    raise TimeoutError("heartbeat timeout")
+                # 心跳超时检测前先记录警告
+                time_since_pong = time.time() - self._last_pong_time
+                if time_since_pong > self.heartbeat_timeout * 0.8:  # 超过 80% 阈值时警告
+                    LOGGER.warning(
+                        "心跳响应延迟: %.1f 秒 (阈值: %.1f 秒)",
+                        time_since_pong,
+                        self.heartbeat_timeout
+                    )
+                if time_since_pong > self.heartbeat_timeout:
+                    raise TimeoutError(f"heartbeat timeout: {time_since_pong:.1f}s")
         except Exception as e:
             LOGGER.error("_heartbeat_worker failed: %s", e)
             self._disconnect_event.set()
@@ -332,7 +372,7 @@ class OptimizedTcpClient:
     async def on_error(self, jdata):
         """错误处理"""
         LOGGER.error("Server error: %s", jdata)
-        self.is_exited = True
+        self._is_exited = True
         self._disconnect_event.set()
 
     async def on_sync_device(self, jdata):

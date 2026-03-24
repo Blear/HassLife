@@ -39,6 +39,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     else:
         HASSLIFE_CONFIGS.load('release')
     HASSLIFE_CONFIGS.get_config_object()["hassconfig"] = cfg
+
+    # 检查是否已有客户端，如有则先停止
+    existing_data = hass.data[DOMAIN].get(entry.entry_id)
+    if existing_data and existing_data.get("client"):
+        LOGGER.info("Stopping existing client before creating new one")
+        await existing_data["client"].stop()
+
     client = TcpClient(HASSLIFE_CONFIGS.get_config_object()['server']['host'],
         int(HASSLIFE_CONFIGS.get_config_object()['server']['port']),hass)
     await client.start()
@@ -51,6 +58,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     data = hass.data[DOMAIN].get(entry.entry_id)
     if data is not None:
-        data["client"].stop()
+        await data["client"].stop()
         hass.data[DOMAIN].pop(entry.entry_id)
     return True
