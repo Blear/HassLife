@@ -1,3 +1,35 @@
+
+<div align="right">
+  <details>
+    <summary >🌐 Language</summary>
+    <div>
+      <div align="center">
+        <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=en">English</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=zh-CN">简体中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=zh-TW">繁體中文</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=ja">日本語</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=ko">한국어</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=hi">हिन्दी</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=th">ไทย</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=fr">Français</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=de">Deutsch</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=es">Español</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=it">Italiano</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=ru">Русский</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=pt">Português</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=nl">Nederlands</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=pl">Polski</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=ar">العربية</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=fa">فارسی</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=tr">Türkçe</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=vi">Tiếng Việt</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=id">Bahasa Indonesia</a>
+        | <a href="https://openaitx.github.io/view.html?user=Blear&project=HassLife&lang=as">অসমীয়া</
+      </div>
+    </div>
+  </details>
+</div>
+
 ## 简介
 
 **交流QQ群: 528735636**
