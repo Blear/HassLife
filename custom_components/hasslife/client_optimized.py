@@ -10,7 +10,8 @@ import hashlib
 import traceback
 import random
 from typing import Optional, Dict, Any
-from homeassistant.const import EVENT_STATE_CHANGED, EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import (EVENT_HOMEASSISTANT_STARTED,
+                                 EVENT_STATE_CHANGED, EVENT_HOMEASSISTANT_STOP)
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers.json import JSONEncoder
 
@@ -18,6 +19,8 @@ from .const import VERSION
 from .hasslife_config import HASSLIFE_CONFIGS
 from .utils import LOGGER
 from .state_manager import StateSyncManager
+from .mcp_tools import get_mcp_registry
+from .conversation_bridge import ConversationBridge
 
 
 class OptimizedTcpClient:
@@ -45,6 +48,8 @@ class OptimizedTcpClient:
         # 事件监听器引用，用于取消注册
         self._state_changed_listener = None
         self._hass_stop_listener = None
+        self._hass_started_listener = None
+        self._mcp_registered = False  # 标记 MCP 工具是否已注册
 
         self._login_info: Dict[str, Any] = {}
         self.entity_ids = []
@@ -59,11 +64,15 @@ class OptimizedTcpClient:
         self._base_reconnect_delay = 2
         self._max_reconnect_delay = 300
 
+        self._conversation_bridge = ConversationBridge(hass, self.send_message_async)
         self.protocol_func_bind_map = {}
         self.init_func_bind_map()
 
         # 状态同步管理器
         self._state_manager = StateSyncManager(hass, self, self.white_domains)
+
+        # MCP 工具注册表
+        self._mcp_registry = get_mcp_registry(hass)
 
     async def start(self):
         """启动客户端 - 最佳实践"""
@@ -81,6 +90,10 @@ class OptimizedTcpClient:
         self._hass_stop_listener = self.hass.bus.async_listen_once(
             EVENT_HOMEASSISTANT_STOP, self._on_hass_stop
         )
+        # 监听 HA 启动完成事件，用于重新加载 MCP 工具
+        self._hass_started_listener = self.hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED, self._on_hass_started
+        )
         self._main_loop_task = asyncio.create_task(self._main_loop())
 
     async def stop(self):
@@ -96,6 +109,10 @@ class OptimizedTcpClient:
             self._state_changed_listener()
             self._state_changed_listener = None
 
+        if self._hass_started_listener:
+            self._hass_started_listener()
+            self._hass_started_listener = None
+
         await self._cleanup_tasks(
             self._sender_task,
             self._receiver_task,
@@ -108,6 +125,19 @@ class OptimizedTcpClient:
 
     async def _on_hass_stop(self, _):
         await self.stop()
+
+    async def _on_hass_started(self, _):
+        """HA 启动完成后的回调 - 重新加载 MCP 工具以获取所有可用的工具"""
+        LOGGER.info("Home Assistant 启动完成，重新加载 MCP 工具...")
+        try:
+            # 清除缓存，强制重新获取工具列表
+            self._mcp_registry.clear_cache()
+            # 重新注册 MCP 工具
+            await self._mcp_registry.register_to_server(self)
+            self._mcp_registered = True
+            LOGGER.info("MCP 工具重新加载完成")
+        except Exception as e:
+            LOGGER.error(f"MCP 工具重新加载失败: {e}", exc_info=True)
 
     async def _main_loop(self):
         """主循环"""
@@ -130,6 +160,7 @@ class OptimizedTcpClient:
                     self._receiver_task,
                     self._heartbeat_task,
                 )
+                await self._conversation_bridge.cancel_pending()
                 await self._close_connection()
                 self._clear_message_queue()
 
@@ -294,7 +325,9 @@ class OptimizedTcpClient:
             "Auth": self.on_auth,
             "Error": self.on_error,
             "SyncDevice": self.on_sync_device,
-            "Pong": self.on_pong
+            "Pong": self.on_pong,
+            "ExecuteMcpTool": self.on_execute_mcp_tool,
+            "ProcessConversation": self._conversation_bridge.dispatch,
         }
 
     async def process_json_pack(self, jdata):
@@ -310,6 +343,44 @@ class OptimizedTcpClient:
         """处理服务器的心跳响应"""
         self._last_pong_time = time.time()
 
+    async def on_execute_mcp_tool(self, jdata):
+        """处理服务器的 MCP 工具执行请求"""
+        try:
+            payload = jdata.get("Payload", {})
+            tool_name = payload.get("tool_name")
+            arguments = payload.get("arguments", {})
+            request_id = jdata.get("RequestID", "")
+
+            LOGGER.info(f"执行 MCP 工具: {tool_name}, 参数: {arguments}")
+
+            # 执行工具
+            result = await self._mcp_registry.execute_tool(tool_name, arguments)
+
+            # 构建响应消息
+            response = {
+                "Type": "ExecuteMcpTool",
+                "RequestID": request_id,
+                "Payload": {
+                    "tool_name": tool_name,
+                    "result": result,
+                }
+            }
+
+            await self.send_message_async(response)
+            LOGGER.info(f"MCP 工具执行完成: {tool_name}")
+
+        except Exception as e:
+            LOGGER.error(f"执行 MCP 工具失败: {e}", exc_info=True)
+            # 发送错误响应
+            await self.send_message_async({
+                "Type": "ExecuteMcpTool",
+                "RequestID": jdata.get("RequestID", ""),
+                "Payload": {
+                    "tool_name": payload.get("tool_name"),
+                    "result": {"error": str(e)}
+                }
+            })
+
     async def _async_on_state_changed(self, event):
         """异步状态变化处理"""
         new_state = event.data.get("new_state")
@@ -322,9 +393,9 @@ class OptimizedTcpClient:
             )
 
     # 委托给状态管理器的方法
-    async def sync_device_async(self,  page=1, page_size=30, search_keyword=None, request_id=''):
+    async def sync_device_async(self,  page=1, page_size=30, search_keyword=None, request_id='', domain_filter=None):
         """设备同步 - 委托给状态管理器，支持分页、搜索和请求ID"""
-        await self._state_manager.sync_all_devices(page, page_size, search_keyword, request_id)
+        await self._state_manager.sync_all_devices(page, page_size, search_keyword, request_id, domain_filter)
     
     async def sync_device_state_async(self, state: State):
         if not state or state.entity_id not in self.entity_ids:
@@ -363,6 +434,20 @@ class OptimizedTcpClient:
     async def on_update_entitys(self, jdata):
         self.entity_ids = jdata.get("Payload", {}).get("entity_ids", [])
 
+        # 收到 UpdateEntitys 表示认证成功，注册 MCP 工具
+        # 如果 HA 还没启动完成，延迟到启动后注册
+        if self.hass.is_running:
+            LOGGER.info("HA 已启动，立即注册 MCP 工具...")
+            try:
+                await self._mcp_registry.register_to_server(self)
+                self._mcp_registered = True
+                LOGGER.info("MCP 工具注册完成")
+            except Exception as e:
+                LOGGER.error(f"MCP 工具注册失败: {e}", exc_info=True)
+        else:
+            LOGGER.info("HA 尚未启动完成，将在启动后注册 MCP 工具...")
+            # 工具注册会在 _on_hass_started 中进行
+
     async def on_auth(self, jdata):
         await self.send_message_async({
             "Type": "Auth",
@@ -384,6 +469,7 @@ class OptimizedTcpClient:
             payload.get("page_size", 30),
             payload.get("search_keyword"),
             jdata.get("RequestID", ""),
+            payload.get("domain"),
         )
     
     def get_login_info(self):
@@ -398,6 +484,3 @@ class OptimizedTcpClient:
             "Version": VERSION,
         }
         return self._login_info
-    
-
-    

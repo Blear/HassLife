@@ -136,7 +136,7 @@ class StateSyncManager:
                 
         return False
     
-    async def sync_all_devices(self, page=1, page_size=30, search_keyword=None, request_id=''):
+    async def sync_all_devices(self, page=1, page_size=30, search_keyword=None, request_id='', domain_filter=None):
         """同步所有设备 - 支持分页、搜索、请求ID和实时发送"""
         # 获取所有需要同步的设备
         devicelist = self.hass.states.async_all()
@@ -148,7 +148,9 @@ class StateSyncManager:
             entity_id = dinfo['entity_id']
             domain = entity_id.split(".")[0]
             
-            if domain in self.white_domains:
+            if (domain_filter == "conversation" and domain == "conversation") or (
+                domain_filter is None and domain in self.white_domains
+            ):
                 # 只保留 entity_id 和 attributes.friendly_name,精简数据格式
                 friendly_name = dinfo.get('attributes', {}).get('friendly_name', "")
                 filtered_device = {
@@ -188,6 +190,7 @@ class StateSyncManager:
                 'Version': self.client.get_login_info()['Version'],
                 'List': jlist,
                 'TotalCount': total_count,
+                'Domain': domain_filter,
                 'Page': page,
                 'PageSize': page_size if page_size is not None else total_count,
                 'HasMore': has_more
