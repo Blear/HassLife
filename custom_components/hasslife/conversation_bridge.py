@@ -49,6 +49,8 @@ class ConversationBridge:
     async def _converse(self, payload):
         if not isinstance(payload, dict):
             return {"error": "HA 对话参数无效"}
+        if payload.get("local_intent") is True:
+            return await self._local_intent(payload.get("text"))
         agent_id, text, bot, sender = (
             payload.get(field) for field in ("agent_id", "text", "bot", "sender")
         )
@@ -79,3 +81,26 @@ class ConversationBridge:
             else:
                 self._sessions.pop(session_key, None)
             return {"text": speech, "conversation_id": conversation_id}
+
+    async def _local_intent(self, text):
+        if not isinstance(text, str) or not text.strip() or len(text.encode()) > 16000:
+            return {"error": "HA 对话参数无效"}
+        async with asyncio.timeout(4):
+            result = await self._hass.services.async_call(
+                "conversation",
+                "process",
+                {"text": text, "agent_id": "conversation.home_assistant"},
+                blocking=True,
+                return_response=True,
+            )
+        response = result.get("response", {})
+        speech = response.get("speech", {}).get("plain", {}).get("speech", "")
+        response_type = response.get("response_type")
+        if response_type == "error":
+            return {
+                "error": speech or "HA 未能处理此指令",
+                "error_code": response.get("data", {}).get("code", ""),
+            }
+        if response_type not in ("action_done", "query_answer") or not speech.strip():
+            return {"error": "HA 本地意图未返回有效回复"}
+        return {"text": speech}

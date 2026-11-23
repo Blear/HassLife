@@ -482,5 +482,6 @@ class OptimizedTcpClient:
             "Username": conf.get("username", ""),
             "Password": hashlib.sha1(conf.get("password", "").encode()).hexdigest(),
             "Version": VERSION,
+            "LocalIntent": True,
         }
         return self._login_info
