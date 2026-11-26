@@ -3,18 +3,20 @@ MCP 工具注册器 - 复用 HomeAssistant 内置 LLM 工具
 """
 from inspect import signature
 import logging
-import voluptuous as vol
 from typing import Any, Dict, List, Optional
 from homeassistant.helpers import llm
 from homeassistant.helpers.llm import LLMContext
 from homeassistant.core import Context, HomeAssistant
 
-# 尝试导入 voluptuous_openapi 用于 Schema 转换
+try:
+    import probatio
+except ImportError:
+    probatio = None
+
 try:
     from voluptuous_openapi import convert as convert_schema
-    HAS_OPENAPI = True
 except ImportError:
-    HAS_OPENAPI = False
+    convert_schema = None
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,8 +31,7 @@ class MCPToolRegistry:
         self.hass = hass
         self._api: Optional[llm.APIInstance] = None
         self._tools_cache: List[Dict[str, Any]] = []
-        # 标记 GetLiveContext 是否是 HA 自带的
-        self._has_native_get_live_context = False
+        self._ha_tool_names: Dict[str, str] = {}
 
     async def _get_api(self) -> llm.APIInstance:
         """获取 APIInstance 实例"""
@@ -63,48 +64,27 @@ class MCPToolRegistry:
         _LOGGER.info(f"创建 LLMContext: platform={context.platform}, assistant={context.assistant}, language={context.language}")
         return context
 
-    def _serialize_schema(self, schema: vol.Schema, custom_serializer=None) -> Dict[str, Any]:
-        """
-        将 voluptuous.Schema 转换为可 JSON 序列化的格式
-
-        Args:
-            schema: voluptuous Schema 对象
-            custom_serializer: HA 提供的自定义序列化器
-
-        Returns:
-            JSON 可序列化的字典（JSON Schema 格式）
-        """
-        # 优先使用 custom_serializer（官方方式）
-        if custom_serializer is not None:
-            try:
-                result = custom_serializer(schema)
-                if isinstance(result, dict):
-                    return result
-            except Exception as e:
-                _LOGGER.debug(f"custom_serializer 转换失败: {e}")
-
-        # 如果已经是字典，直接返回
+    def _serialize_schema(self, schema: Any, custom_serializer=None) -> Dict[str, Any]:
         if isinstance(schema, dict):
-            return schema
+            parameters = schema
+        elif probatio is not None and isinstance(schema, probatio.Schema):
+            parameters = probatio.to_openapi(schema, custom_serializer=custom_serializer)
+        elif convert_schema is not None:
+            parameters = convert_schema(schema, custom_serializer=custom_serializer)
+        else:
+            raise TypeError("No compatible tool schema converter")
 
-        # 尝试使用 voluptuous_openapi 转换
-        if HAS_OPENAPI:
-            try:
-                from voluptuous_openapi import convert
-                converted = convert(schema)
-                if isinstance(converted, dict):
-                    return converted
-            except Exception as e:
-                _LOGGER.debug(f"voluptuous_openapi 转换失败: {e}")
+        if parameters.get("type") != "object" or not isinstance(parameters.get("properties", {}), dict):
+            raise ValueError("Tool schema is not an object")
+        return {"properties": {}, **parameters}
 
-        # 回退方案：尝试从 Schema 提取信息
-        # 检查是否是空 Schema
-        if hasattr(schema, 'schema') and not schema.schema:
-            return {"type": "object", "properties": {}}
-
-        # 默认返回空对象 schema
-        _LOGGER.warning(f"无法序列化 Schema 类型: {type(schema)}, 使用默认空对象")
-        return {"type": "object", "properties": {}}
+    @staticmethod
+    def _public_tool_name(name: str) -> str:
+        if name == "homeassistant__GetLiveContext":
+            return "GetLiveContext"
+        if name.startswith("intent__Hass"):
+            return name.removeprefix("intent__")
+        return name
 
     async def get_mcp_tools(self) -> List[Dict[str, Any]]:
         """
@@ -139,32 +119,32 @@ class MCPToolRegistry:
             _LOGGER.info(f"custom_serializer: {api.custom_serializer}")
 
             mcp_tools = []
-            tool_names = set()
-            self._has_native_get_live_context = False  # 重置标志
+            ha_tool_names = {}
 
             for tool in api.tools:
-                # 将 voluptuous.Schema 转换为可序列化的格式（使用 custom_serializer）
-                parameters = self._serialize_schema(tool.parameters, api.custom_serializer)
+                name = self._public_tool_name(tool.name)
+                if name in ha_tool_names:
+                    continue
+                try:
+                    parameters = self._serialize_schema(tool.parameters, api.custom_serializer)
+                except Exception as error:
+                    _LOGGER.warning("无法序列化工具 %s 的参数，跳过注册: %s", tool.name, type(error).__name__)
+                    continue
 
                 mcp_tools.append({
                     "type": "function",
                     "function": {
-                        "name": tool.name,
-                        "description": tool.description,
+                        "name": name,
+                        "description": tool.description or "",
                         "parameters": parameters,
                     }
                 })
-                tool_names.add(tool.name)
-                _LOGGER.debug(f"注册工具: {tool.name}")
-
-                # 检查是否有原生的 GetLiveContext
-                if tool.name == "GetLiveContext":
-                    self._has_native_get_live_context = True
-                    _LOGGER.info("✓ 检测到 HA 原生 GetLiveContext 工具")
+                ha_tool_names[name] = tool.name
+                _LOGGER.debug("注册工具: %s", name)
 
             # 只有在没有原生 GetLiveContext 时才手动添加
-            if "GetLiveContext" not in tool_names:
-                _LOGGER.warning("GetLiveContext 未加载，使用手动实现...")
+            if "GetLiveContext" not in ha_tool_names:
+                _LOGGER.info("HA 未提供可用的原生 GetLiveContext，使用插件实现")
                 # 手动添加 GetLiveContext 工具
                 get_live_context = {
                     "type": "function",
@@ -181,6 +161,7 @@ class MCPToolRegistry:
                 mcp_tools.append(get_live_context)
                 _LOGGER.info("已手动添加 GetLiveContext 工具")
 
+            self._ha_tool_names = ha_tool_names
             self._tools_cache = mcp_tools
             _LOGGER.info(f"成功加载 {len(mcp_tools)} 个 HA 内置工具")
 
@@ -195,57 +176,25 @@ class MCPToolRegistry:
             return []
 
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        """
-        执行 MCP 工具调用
-
-        Args:
-            tool_name: 工具名称
-            arguments: 工具参数
-
-        Returns:
-            工具执行结果
-        """
+        """执行已注册的 HA 工具。"""
         try:
+            await self.get_mcp_tools()
+            ha_name = self._ha_tool_names.get(tool_name)
+            if tool_name == "GetLiveContext" and ha_name is None:
+                return await self._execute_get_live_context()
+            if ha_name is None:
+                return {"error": f"未注册的工具: {tool_name}"}
+
             api = await self._get_api()
-
-            # 构建 HA ToolInput
-            from homeassistant.helpers.llm import ToolInput
-
-            tool_input = ToolInput(
-                tool_name=tool_name,
-                tool_args=arguments,
-            )
-
-            _LOGGER.info(f"执行工具: {tool_name}, 参数: {arguments}")
-
-            # 特殊处理 GetLiveContext
-            if tool_name == "GetLiveContext":
-                # 优先使用 HA 原生 GetLiveContext
-                if self._has_native_get_live_context:
-                    _LOGGER.info("使用 HA 原生 GetLiveContext")
-                    try:
-                        result = await api.async_call_tool(tool_input)
-                        _LOGGER.info(f"HA 原生 GetLiveContext 执行成功")
-                        return result
-                    except Exception as e:
-                        _LOGGER.warning(f"HA 原生 GetLiveContext 执行失败: {e}，尝试手动实现")
-                        # 原生失败，回退到手动实现
-                        return await self._execute_get_live_context()
-                else:
-                    # 没有原生版本，使用手动实现
-                    _LOGGER.info("使用手动实现的 GetLiveContext")
-                    return await self._execute_get_live_context()
-
-            # 通过 HA 的 API 执行其他工具
-            # 注意: APIInstance 的方法是 async_call_tool，不是 async_call
+            tool_input = llm.ToolInput(tool_name=ha_name, tool_args=arguments)
             result = await api.async_call_tool(tool_input)
-
-            _LOGGER.info(f"工具执行结果: {result}")
+            tool_result_type = getattr(llm, "ToolResult", None)
+            if tool_result_type is not None and isinstance(result, tool_result_type):
+                return {"data": result.data, "error": result.error}
             return result
-
-        except Exception as e:
-            _LOGGER.error(f"执行工具 {tool_name} 失败: {e}", exc_info=True)
-            return {"error": str(e)}
+        except Exception as error:
+            _LOGGER.error("执行工具 %s 失败: %s", tool_name, error, exc_info=True)
+            return {"error": str(error)}
 
     async def _execute_get_live_context(self) -> Dict[str, Any]:
         """
